@@ -37,6 +37,13 @@ public struct LiveStudioView: View {
             speakerRenameSheet
                 .aileronTheme(engine.settings.appearance)
         }
+        .onChange(of: engine.telemetry.isCapturing) { oldValue, newValue in
+            if !oldValue && newValue && !layout.showTranscriptDrawer {
+                withAnimation(.snappy(duration: 0.22)) {
+                    layout.showTranscriptDrawer = true
+                }
+            }
+        }
     }
 
     private var topToolbar: some View {
@@ -201,6 +208,10 @@ public struct LiveStudioView: View {
                 }
             }
 
+            if engine.telemetry.isCapturing || engine.isTranscribing || engine.isStreamingAI {
+                livePipelineBar
+            }
+
             if !engine.livePartialText.isEmpty && !layout.showTranscriptDrawer {
                 HStack(spacing: 8) {
                     Circle()
@@ -275,6 +286,56 @@ public struct LiveStudioView: View {
             composerBar
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var livePipelineBar: some View {
+        HStack(spacing: 14) {
+            pipelineStage(
+                label: "Listen",
+                active: engine.telemetry.isCapturing,
+                highlighted: engine.telemetry.isSpeechActive
+            )
+            Image(systemName: "chevron.right")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(theme.textTertiary)
+            pipelineStage(
+                label: engine.isTranscribing ? "Transcribing…" : "Transcribe",
+                active: !engine.livePartialText.isEmpty || engine.isTranscribing,
+                highlighted: engine.isTranscribing || !engine.livePartialText.isEmpty
+            )
+            Image(systemName: "chevron.right")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(theme.textTertiary)
+            pipelineStage(
+                label: engine.isStreamingAI ? "Answering…" : "AI Answer",
+                active: engine.isStreamingAI,
+                highlighted: engine.isStreamingAI
+            )
+            Spacer()
+            if engine.telemetry.isCapturing {
+                Text(engine.telemetry.activeDeviceName)
+                    .font(.system(size: 11))
+                    .foregroundStyle(theme.textTertiary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 7)
+        .background(theme.surface.opacity(0.65))
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(theme.borderSubtle).frame(height: 1)
+        }
+    }
+
+    private func pipelineStage(label: String, active: Bool, highlighted: Bool) -> some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(highlighted ? theme.live : (active ? theme.accent : theme.textTertiary.opacity(0.4)))
+                .frame(width: 6, height: 6)
+            Text(label)
+                .font(.system(size: 11.5, weight: highlighted ? .semibold : .medium))
+                .foregroundStyle(highlighted ? theme.textPrimary : theme.textSecondary)
+        }
     }
 
     private var emptyFocusState: some View {
@@ -576,6 +637,10 @@ public struct LiveStudioView: View {
                 Text(turn.timestamp.formatted(date: .omitted, time: .shortened))
                     .font(.system(size: 10.5))
                     .foregroundStyle(theme.textTertiary)
+
+                if turn.isQuestion {
+                    SoftPill("Question", color: theme.accent, fill: theme.accentTint)
+                }
 
                 Spacer()
 

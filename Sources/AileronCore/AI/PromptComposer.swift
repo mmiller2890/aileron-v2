@@ -20,10 +20,11 @@ public struct AIChatMessage: Equatable, Sendable {
 
 public enum PromptComposer {
     public static let captureAnswerRules =
-        "You are writing what the user will say aloud, in their own voice, to the person they are talking with. " +
-        "Write in the first person as the user. Never say or imply that you are an AI, an assistant, or a language model. " +
-        "Never write bracketed placeholders such as [X] or [company]: if a fact about the user is not known, answer naturally without it. " +
-        "If what was said is small talk or not a question, reply with a brief natural line the user could say."
+        "You are writing a complete, ready-to-speak answer that the user will say aloud, in their own first-person voice, to the person they are speaking with. " +
+        "Always directly answer the question, scenario, or topic being asked — even if the transcript comes from a mock interview, training video, or multi-sentence prompt. " +
+        "Never reply with passive acknowledgments such as 'Got it', 'Ready', 'Go ahead', 'I am listening', or 'Let us hear it'. " +
+        "Never say or imply that you are an AI, an assistant, or a language model. " +
+        "Never write bracketed placeholders such as [X] or [company]: if a specific detail is unknown, answer cleanly without it."
 
     public static func composeSystemPrompt(
         profile: PrepProfile?,
@@ -55,11 +56,12 @@ public enum PromptComposer {
     public static func composeMessages(
         userPrompt: String,
         screenshotJPEG: Data? = nil,
+        forCapturedSpeech: Bool = false,
         recentTurns: [TranscriptTurn],
         recentExchanges: [AIExchange],
         speakerAliases: [String: String] = [:],
-        maxTurns: Int = 18,
-        maxExchanges: Int = 5
+        maxTurns: Int = 14,
+        maxExchanges: Int = 4
     ) -> [AIChatMessage] {
         var messages: [AIChatMessage] = []
 
@@ -72,23 +74,34 @@ public enum PromptComposer {
             }.joined(separator: "\n")
             messages.append(AIChatMessage(
                 role: .user,
-                text: "Recent live conversation transcript:\n\(formattedTranscript)"
+                text: "Background transcript of the conversation so far:\n\(formattedTranscript)"
             ))
             messages.append(AIChatMessage(
                 role: .assistant,
-                text: "Understood. I have the live conversation context."
+                text: "I have the conversation context and will answer the next question directly in the user's voice."
             ))
         }
 
         for exchange in recentExchanges.suffix(maxExchanges) {
             let promptText = exchange.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
             let responseText = exchange.response.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !promptText.isEmpty, !responseText.isEmpty else { continue }
+            guard !promptText.isEmpty,
+                  responseText.count >= 24,
+                  !responseText.hasPrefix("_Error:") else { continue }
             messages.append(AIChatMessage(role: .user, text: promptText))
             messages.append(AIChatMessage(role: .assistant, text: responseText))
         }
 
-        messages.append(AIChatMessage(role: .user, text: userPrompt, imageJPEGData: screenshotJPEG))
+        let finalUserText: String
+        if forCapturedSpeech {
+            finalUserText =
+                "The other speaker just said:\n\"\(userPrompt)\"\n\n" +
+                "Identify the core question or prompt here and write a clear, strong, first-person spoken answer the user can deliver right now."
+        } else {
+            finalUserText = userPrompt
+        }
+
+        messages.append(AIChatMessage(role: .user, text: finalUserText, imageJPEGData: screenshotJPEG))
         return messages
     }
 

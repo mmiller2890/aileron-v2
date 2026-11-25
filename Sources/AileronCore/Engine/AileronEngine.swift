@@ -43,6 +43,7 @@ public final class AileronEngine {
     public var livePartialSpeaker: String?
     public var liveMicText: String = ""
     public var micRmsLevel: Float = 0
+    public var isTranscribing: Bool = false
     public var isStreamingAI: Bool = false
     public var streamingExchangeId: UUID?
     public var pendingScreenshot: CapturedScreenshot?
@@ -59,6 +60,7 @@ public final class AileronEngine {
     private var accumulatedMicSamples16k: [Float] = []
     private var micPreprocessor = AudioPreprocessor()
     private var aiTask: Task<Void, Never>?
+    private var queuedAutoPrompt: String?
     private var saveTask: Task<Void, Never>?
     private var activeTap: SystemAudioTap?
 
@@ -522,9 +524,11 @@ public final class AileronEngine {
             livePartialText = ""
             livePartialSpeaker = nil
             liveTextBatch.removeAll(keepingCapacity: true)
+            isTranscribing = true
 
             do {
                 let outcome = try await speechEngine.transcribe(samples16k: samples)
+                isTranscribing = false
                 telemetry.lastRtfx = outcome.rtfx
                 telemetry.lastTranscribeMs = Int(outcome.processingSeconds * 1000)
 
@@ -550,11 +554,21 @@ public final class AileronEngine {
                     currentSession.title = Self.deriveTitle(from: text)
                 }
                 schedulePersistSession()
+                DiagnosticsLog.shared.record(
+                    category: "speech",
+                    message: "Turn #\(turn.sequence) committed (\(Int(duration * 1000)) ms, question=\(isQuestion))"
+                )
 
                 if settings.autoAnswerQuestions && isQuestion {
-                    ask(text, usePendingScreenshot: false, isCapturedSpeech: true, triggeredAutomatically: true)
+                    if isStreamingAI {
+                        queuedAutoPrompt = text
+                    } else {
+                        ask(text, usePendingScreenshot: false, isCapturedSpeech: true, triggeredAutomatically: true)
+                    }
                 }
             } catch {
+                isTranscribing = false
+                DiagnosticsLog.shared.record(category: "speech", message: "Transcription failed: \(error.localizedDescription)")
                 bannerNotice = EngineNotice(level: .error, message: "Transcription failed: \(error.localizedDescription)")
             }
         }
@@ -769,6 +783,7 @@ public final class AileronEngine {
     public func cancelAIResponse() {
         aiTask?.cancel()
         aiTask = nil
+        queuedAutoPrompt = nil
         isStreamingAI = false
         streamingExchangeId = nil
     }
@@ -782,6 +797,9 @@ public final class AileronEngine {
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
+        if !triggeredAutomatically {
+            queuedAutoPrompt = nil
+        }
         aiTask?.cancel()
         bannerNotice = nil
 
@@ -800,6 +818,7 @@ public final class AileronEngine {
         let messages = PromptComposer.composeMessages(
             userPrompt: trimmed,
             screenshotJPEG: screenshot?.jpegData,
+            forCapturedSpeech: isCapturedSpeech,
             recentTurns: currentSession.turns,
             recentExchanges: currentSession.exchanges,
             speakerAliases: currentSession.speakerAliases
@@ -847,13 +866,20 @@ public final class AileronEngine {
                 self.streamingExchangeId = nil
                 self.currentSession.updatedAt = Date()
                 self.schedulePersistSession()
+
+                if !Task.isCancelled, let nextPrompt = self.queuedAutoPrompt {
+                    self.queuedAutoPrompt = nil
+                    self.ask(nextPrompt, usePendingScreenshot: false, isCapturedSpeech: true, triggeredAutomatically: true)
+                }
             } catch {
                 self.isStreamingAI = false
                 self.streamingExchangeId = nil
+                self.queuedAutoPrompt = nil
                 if let idx = self.currentSession.exchanges.firstIndex(where: { $0.id == exchangeId }),
                    self.currentSession.exchanges[idx].response.isEmpty {
                     self.currentSession.exchanges[idx].response = "_Error: \(error.localizedDescription)_"
                 }
+                DiagnosticsLog.shared.record(category: "ai", message: "AI stream failed: \(error.localizedDescription)")
                 self.bannerNotice = EngineNotice(level: .error, message: error.localizedDescription)
                 self.schedulePersistSession()
             }

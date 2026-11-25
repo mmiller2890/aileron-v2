@@ -124,6 +124,9 @@ final class AileronCoreTests: XCTestCase {
         XCTAssertTrue(QuestionGate.isLikelyQuestion("How do you design a distributed rate limiter?"))
         XCTAssertTrue(QuestionGate.isLikelyQuestion("So walk me through your caching layer"))
         XCTAssertTrue(QuestionGate.isLikelyQuestion("Okay, can you describe an outage you owned"))
+        XCTAssertTrue(QuestionGate.isLikelyQuestion("Have you ever handled an irate customer"))
+        XCTAssertFalse(QuestionGate.isLikelyQuestion("Have a brilliant day."))
+        XCTAssertFalse(QuestionGate.isLikelyQuestion("Have it within your inbox within two minutes."))
         XCTAssertFalse(QuestionGate.isLikelyQuestion("Sounds good, let's move on to the next slide."))
         XCTAssertFalse(QuestionGate.isLikelyQuestion("We deployed that service last Tuesday."))
 
@@ -206,15 +209,19 @@ final class AileronCoreTests: XCTestCase {
 
         let messages = PromptComposer.composeMessages(
             userPrompt: "Tell me about your p99 work.",
+            forCapturedSpeech: true,
             recentTurns: [
                 TranscriptTurn(sequence: 1, text: "Let's dive into latency.", speaker: "Speaker 1")
             ],
-            recentExchanges: [],
+            recentExchanges: [
+                AIExchange(prompt: "Hi", response: "Got it", providerName: "Ollama", modelName: "test")
+            ],
             speakerAliases: ["Speaker 1": "Alex"]
         )
         XCTAssertEqual(messages.count, 3)
         XCTAssertTrue(messages[0].text.contains("[Alex]: Let's dive into latency."))
-        XCTAssertEqual(messages.last?.text, "Tell me about your p99 work.")
+        XCTAssertTrue(messages.last?.text.contains("Tell me about your p99 work.") == true)
+        XCTAssertTrue(messages.last?.text.contains("first-person spoken answer") == true)
     }
 
     func testAIClientStreamParsers() {

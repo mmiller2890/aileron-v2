@@ -39,16 +39,20 @@ public enum BackchannelFilter {
 }
 
 public enum QuestionGate {
-    private static let trailingQuestion = try! NSRegularExpression(
-        pattern: "\\?\\s*$",
+    private static let questionMarkPattern = try! NSRegularExpression(
+        pattern: "\\?",
         options: []
     )
-    private static let leadingPattern = try! NSRegularExpression(
-        pattern: "^(?:so[,\\s]+|and[,\\s]+|now[,\\s]+|okay[,\\s]+|ok[,\\s]+|well[,\\s]+)*(?:what|why|how|when|where|who|whom|whose|which|can|could|would|will|should|shall|do|does|did|is|are|was|were|am|have|has|had|may|might|must|tell me|explain|describe|walk me through|talk me through|talk about|give me|define|compare|name|list|share|elaborate)\\b",
+    private static let leadingWhOrPromptPattern = try! NSRegularExpression(
+        pattern: "^(?:so[,\\s]+|and[,\\s]+|now[,\\s]+|okay[,\\s]+|ok[,\\s]+|well[,\\s]+)*(?:what|why|how|when|where|who|whom|whose|which|tell me|explain|describe|walk me through|talk me through|talk about|give me|define|compare|name|list|share|elaborate)\\b",
+        options: [.caseInsensitive]
+    )
+    private static let leadingAuxiliaryQuestionPattern = try! NSRegularExpression(
+        pattern: "^(?:so[,\\s]+|and[,\\s]+|now[,\\s]+|okay[,\\s]+|ok[,\\s]+|well[,\\s]+)*(?:(?:have\\s+(?:you|we|they|i))|(?:(?:can|could|would|will|should|shall|do|does|did|is|are|was|were|has|had|may|might)\\s+(?:you|we|they|i|it|this|that|there|he|she|your|anyone|someone)))\\b",
         options: [.caseInsensitive]
     )
     private static let embeddedPattern = try! NSRegularExpression(
-        pattern: "\\b(?:can you|could you|would you|will you|do you|did you|have you|are you|tell me|explain|describe|walk me through|what is|what are|what's|what was|what were|how do|how does|how did|how would|how was|why is|why do|why did|why would|when do|when did|where do|where did|give me an example|give an example)\\b",
+        pattern: "\\b(?:can you|could you|would you|will you|do you|did you|have you|are you|tell me about|tell me how|tell me why|explain how|explain why|describe a time|describe how|walk me through|what is|what are|what's|what was|what were|what do you|how do you|how would you|how did you|how does|why do you|why would you|why is|give me an example|give an example)\\b",
         options: [.caseInsensitive]
     )
 
@@ -56,10 +60,13 @@ public enum QuestionGate {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
         let range = NSRange(trimmed.startIndex..., in: trimmed)
-        if trailingQuestion.firstMatch(in: trimmed, range: range) != nil {
+        if questionMarkPattern.firstMatch(in: trimmed, range: range) != nil {
             return true
         }
-        if leadingPattern.firstMatch(in: trimmed, range: range) != nil {
+        if leadingWhOrPromptPattern.firstMatch(in: trimmed, range: range) != nil {
+            return true
+        }
+        if leadingAuxiliaryQuestionPattern.firstMatch(in: trimmed, range: range) != nil {
             return true
         }
         return embeddedPattern.firstMatch(in: trimmed, range: range) != nil
