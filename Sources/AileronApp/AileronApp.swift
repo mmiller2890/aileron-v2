@@ -58,6 +58,18 @@ final class AileronAppDelegate: NSObject, NSApplicationDelegate {
         hotKeyManager = HotKeyManager { [weak self] key in
             self?.handleHotKey(key)
         }
+        engine.updateHotKeyStatuses(
+            hotKeyManager.registrationStatuses,
+            conflictedShortcuts: hotKeyManager.conflictedShortcuts
+        )
+        engine.onReregisterHotKeys = { [weak self] in
+            guard let self else { return }
+            self.hotKeyManager.reregisterAll()
+            self.engine.updateHotKeyStatuses(
+                self.hotKeyManager.registrationStatuses,
+                conflictedShortcuts: self.hotKeyManager.conflictedShortcuts
+            )
+        }
 
         setupMainMenu()
         setupStatusBarItem()

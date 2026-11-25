@@ -253,8 +253,35 @@ final class AileronCoreTests: XCTestCase {
         XCTAssertEqual(decoded.appearance.preset, .graphite)
         XCTAssertEqual(decoded.appearance.colorMode, .dark)
         XCTAssertEqual(decoded.streamingLatency, .ms320)
+        XCTAssertEqual(decoded.hasCompletedOnboarding, false)
         XCTAssertEqual(StreamingLatencyPreset.ms160.batchSamples16k, 2_560)
         XCTAssertEqual(StreamingLatencyPreset.ms320.batchSamples16k, 5_120)
         XCTAssertEqual(StreamingLatencyPreset.ms1280.batchSamples16k, 20_480)
+    }
+
+    func testDiagnosticsLogBoundedRingAndReport() {
+        let log = DiagnosticsLog(maxEntries: 25)
+        for i in 1...40 {
+            log.record(category: "test", message: "event \(i)")
+        }
+        let entries = log.recentEntries()
+        XCTAssertEqual(entries.count, 25)
+        XCTAssertTrue(entries.first?.contains("event 16") == true)
+        XCTAssertTrue(entries.last?.contains("event 40") == true)
+
+        let report = log.buildReport(
+            settings: AppSettings(),
+            speechStatus: SpeechModelStatus(),
+            outputDevices: [AudioDeviceInfo(id: "out-1", name: "Studio Speakers", isDefault: true, isInput: false)],
+            inputDevices: [AudioDeviceInfo(id: "in-1", name: "MacBook Pro Mic", isDefault: true, isInput: true)],
+            hotkeySummary: ["⌘\\: active"]
+        )
+        XCTAssertTrue(report.contains("Aileron Diagnostic Report"))
+        XCTAssertTrue(report.contains("Studio Speakers"))
+        XCTAssertTrue(report.contains("MacBook Pro Mic"))
+        XCTAssertTrue(report.contains("event 40"))
+
+        let notice = EngineNotice(level: .error, message: "No mic", permissionAction: .microphone)
+        XCTAssertEqual(notice.permissionAction, .microphone)
     }
 }

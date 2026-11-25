@@ -1,4 +1,6 @@
+import AudioToolbox
 import AVFoundation
+import CoreAudio
 import Foundation
 
 public enum MicCaptureError: LocalizedError {
@@ -19,7 +21,7 @@ public enum MicCaptureError: LocalizedError {
 }
 
 public final class MicCapture: @unchecked Sendable {
-    private let engine = AVAudioEngine()
+    private var engine = AVAudioEngine()
     private let ringBuffer = AudioRingBuffer(capacity: 48_000 * 10)
     private let lock = NSLock()
     private var isRunning = false
@@ -33,17 +35,43 @@ public final class MicCapture: @unchecked Sendable {
         return inputSampleRate
     }
 
-    public func start() async throws {
+    public func start(preferredInputUID: String? = nil) async throws {
         let granted = await AVCaptureDevice.requestAccess(for: .audio)
         guard granted else {
             throw MicCaptureError.permissionDenied
         }
+        try startEngineLocked(preferredInputUID: preferredInputUID)
+    }
 
+    private func startEngineLocked(preferredInputUID: String?) throws {
         lock.lock()
         defer { lock.unlock() }
         if isRunning { return }
 
+        engine = AVAudioEngine()
         let inputNode = engine.inputNode
+
+        if let uid = preferredInputUID,
+           !uid.isEmpty,
+           uid != "default",
+           var deviceID = AudioDeviceManager.findInputDeviceID(uid: uid),
+           let audioUnit = inputNode.audioUnit {
+            let status = AudioUnitSetProperty(
+                audioUnit,
+                kAudioOutputUnitProperty_CurrentDevice,
+                kAudioUnitScope_Global,
+                0,
+                &deviceID,
+                UInt32(MemoryLayout<AudioDeviceID>.size)
+            )
+            if status != noErr {
+                DiagnosticsLog.shared.record(
+                    category: "mic",
+                    message: "Preferred input device bind failed (OSStatus \(status)); falling back to default"
+                )
+            }
+        }
+
         let format = inputNode.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else {
             throw MicCaptureError.invalidInputFormat

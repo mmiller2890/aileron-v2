@@ -127,6 +127,16 @@ public enum AudioDeviceManager {
         return nil
     }
 
+    public static func findInputDeviceID(uid: String) -> AudioDeviceID? {
+        for id in allDeviceIDs() {
+            if channelCount(for: id, scope: kAudioDevicePropertyScopeInput) > 0,
+               deviceUID(for: id) == uid {
+                return id
+            }
+        }
+        return nil
+    }
+
     public static func deviceUID(for deviceID: AudioDeviceID) -> String? {
         stringProperty(deviceID: deviceID, selector: kAudioDevicePropertyDeviceUID)
     }

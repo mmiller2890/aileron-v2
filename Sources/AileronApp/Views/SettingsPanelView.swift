@@ -1,5 +1,7 @@
 import AileronCore
+import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 private enum SettingsCategory: String, CaseIterable, Identifiable {
     case appearance = "Appearance"
@@ -28,6 +30,7 @@ public struct SettingsPanelView: View {
                     case .audio:
                         audioSection
                         conversationSection
+                        permissionsAndDiagnosticsSection
                     case .shortcuts:
                         shortcutsSection
                     }
@@ -36,6 +39,9 @@ public struct SettingsPanelView: View {
                 .padding(28)
                 .frame(maxWidth: .infinity)
             }
+        }
+        .onAppear {
+            engine.refreshPermissions()
         }
     }
 
@@ -95,6 +101,28 @@ public struct SettingsPanelView: View {
                     )) {
                         Text("Follow System Default").tag("default")
                         ForEach(engine.outputDevices) { dev in
+                            Text(dev.isDefault ? "\(dev.name) (Default)" : dev.name).tag(dev.id)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(maxWidth: 260)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+
+                Divider().overlay(theme.borderSubtle).padding(.leading, 16)
+
+                HStack {
+                    Text("Microphone Input")
+                        .font(.system(size: 13))
+                        .foregroundStyle(theme.textPrimary)
+                    Spacer()
+                    Picker("", selection: Binding(
+                        get: { engine.settings.inputDeviceId },
+                        set: { engine.settings.inputDeviceId = $0; engine.saveSettings() }
+                    )) {
+                        Text("Follow System Default").tag("default")
+                        ForEach(engine.inputDevices) { dev in
                             Text(dev.isDefault ? "\(dev.name) (Default)" : dev.name).tag(dev.id)
                         }
                     }
@@ -220,31 +248,112 @@ public struct SettingsPanelView: View {
         }
     }
 
-    private var shortcutsSection: some View {
+    private var permissionsAndDiagnosticsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Keyboard Shortcuts")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(theme.textPrimary)
+            HStack {
+                Text("Permissions & Diagnostics")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(theme.textPrimary)
+                Spacer()
+                Button("Open Setup Guide") {
+                    engine.reopenOnboarding()
+                }
+                .buttonStyle(SoftButtonStyle(.quiet, compact: true))
+            }
 
             VStack(spacing: 0) {
-                shortcutRow("Toggle Sidebar", shortcut: "⌘⌥S")
+                permissionQuickRow(.systemAudio, state: engine.permissions.systemAudio)
                 Divider().overlay(theme.borderSubtle).padding(.leading, 16)
-                shortcutRow("Toggle Live Transcript", shortcut: "⌘⌥T")
+                permissionQuickRow(.microphone, state: engine.permissions.microphone)
+                Divider().overlay(theme.borderSubtle).padding(.leading, 16)
+                permissionQuickRow(.screenRecording, state: engine.permissions.screenRecording)
+                Divider().overlay(theme.borderSubtle).padding(.leading, 16)
+
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Diagnostic Report")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(theme.textPrimary)
+                        Text("Exports system & audio status for troubleshooting (secrets and transcripts excluded)")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(theme.textSecondary)
+                    }
+                    Spacer()
+                    Button("Export Report…") {
+                        exportDiagnostics()
+                    }
+                    .buttonStyle(SoftButtonStyle(.subtle, compact: true))
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 11)
+            }
+            .softCard(background: theme.surface, radius: 14)
+        }
+    }
+
+    private func permissionQuickRow(_ kind: PermissionKind, state: PermissionState) -> some View {
+        HStack(spacing: 12) {
+            Text(kind.title)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(theme.textPrimary)
+            Spacer()
+            if state == .granted {
+                SoftPill("Granted", color: theme.live, fill: theme.liveTint)
+            } else {
+                Button(state == .denied ? "Open Settings" : "Grant / Test") {
+                    engine.requestPermission(kind)
+                }
+                .buttonStyle(SoftButtonStyle(state == .denied ? .danger : .subtle, compact: true))
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+    }
+
+    private var shortcutsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Keyboard Shortcuts")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(theme.textPrimary)
+                Spacer()
+                Button("Re-register Global Shortcuts") {
+                    engine.onReregisterHotKeys?()
+                }
+                .buttonStyle(SoftButtonStyle(.quiet, compact: true))
+            }
+
+            VStack(spacing: 0) {
+                shortcutRow("Toggle Sidebar", shortcut: "⌘⌥S", registered: nil)
+                Divider().overlay(theme.borderSubtle).padding(.leading, 16)
+                shortcutRow("Toggle Live Transcript", shortcut: "⌘⌥T", registered: nil)
                 ForEach(AileronHotKey.allCases, id: \.rawValue) { key in
                     Divider().overlay(theme.borderSubtle).padding(.leading, 16)
-                    shortcutRow(key.label, shortcut: key.displayShortcut)
+                    shortcutRow(
+                        key.label,
+                        shortcut: key.displayShortcut,
+                        registered: engine.hotkeyStatuses[key.rawValue]
+                    )
                 }
             }
             .softCard(background: theme.surface, radius: 14)
         }
     }
 
-    private func shortcutRow(_ label: String, shortcut: String) -> some View {
-        HStack {
+    private func shortcutRow(_ label: String, shortcut: String, registered: Bool?) -> some View {
+        HStack(spacing: 10) {
             Text(label)
                 .font(.system(size: 13))
                 .foregroundStyle(theme.textPrimary)
             Spacer()
+            if let registered {
+                SoftPill(
+                    registered ? "Active" : "Conflict",
+                    color: registered ? theme.live : theme.warn,
+                    fill: registered ? theme.liveTint : theme.warn.opacity(0.16)
+                )
+                .help(registered ? "Registered globally with macOS" : "Another application currently owns this shortcut")
+            }
             Text(shortcut)
                 .font(.system(size: 11.5, weight: .medium, design: .monospaced))
                 .foregroundStyle(theme.textSecondary)
@@ -300,5 +409,19 @@ public struct SettingsPanelView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 11)
+    }
+
+    private func exportDiagnostics() {
+        let hotkeySummary = AileronHotKey.allCases.map { key -> String in
+            let state = engine.hotkeyStatuses[key.rawValue] == true ? "active" : "conflict"
+            return "\(key.displayShortcut) (\(key.label)): \(state)"
+        }
+        let report = engine.exportDiagnosticReport(hotkeySummary: hotkeySummary)
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.plainText]
+        panel.nameFieldStringValue = "aileron-diagnostics.txt"
+        if panel.runModal() == .OK, let url = panel.url {
+            try? report.write(to: url, atomically: true, encoding: .utf8)
+        }
     }
 }

@@ -41,12 +41,12 @@ public enum AileronHotKey: UInt32, CaseIterable, Sendable {
 
     public var label: String {
         switch self {
-        case .toggleHUD: return "Show / Hide Stealth HUD"
-        case .toggleDashboard: return "Open Command Center"
+        case .toggleHUD: return "Show / Hide Floating Bar"
+        case .toggleDashboard: return "Open Main Window"
         case .toggleListening: return "Start / Stop System Audio"
         case .answerLast: return "Answer Last Utterance"
         case .captureScreen: return "Capture Screen & Analyze"
-        case .toggleMic: return "Voice Dictation Ask"
+        case .toggleMic: return "Live Streaming Voice Ask"
         }
     }
 }
@@ -57,13 +57,29 @@ public final class HotKeyManager {
     private var eventHandlerRef: EventHandlerRef?
     private var hotKeyRefs: [EventHotKeyRef] = []
     private let onTrigger: @MainActor (AileronHotKey) -> Void
+    public private(set) var registrationStatuses: [UInt32: Bool] = [:]
 
     public init(onTrigger: @escaping @MainActor (AileronHotKey) -> Void) {
         self.onTrigger = onTrigger
-        install()
+        installEventHandler()
+        registerAll()
     }
 
-    private func install() {
+    public var conflictedShortcuts: [String] {
+        AileronHotKey.allCases
+            .filter { registrationStatuses[$0.rawValue] == false }
+            .map(\.displayShortcut)
+    }
+
+    public func reregisterAll() {
+        for ref in hotKeyRefs {
+            UnregisterEventHotKey(ref)
+        }
+        hotKeyRefs.removeAll()
+        registerAll()
+    }
+
+    private func installEventHandler() {
         var eventSpec = EventTypeSpec(
             eventClass: OSType(kEventClassKeyboard),
             eventKind: UInt32(kEventHotKeyPressed)
@@ -99,7 +115,10 @@ public final class HotKeyManager {
             selfPtr,
             &eventHandlerRef
         )
+    }
 
+    private func registerAll() {
+        var statuses: [UInt32: Bool] = [:]
         for action in AileronHotKey.allCases {
             var ref: EventHotKeyRef?
             let hotKeyID = EventHotKeyID(signature: Self.signature, id: action.rawValue)
@@ -113,8 +132,12 @@ public final class HotKeyManager {
             )
             if status == noErr, let ref {
                 hotKeyRefs.append(ref)
+                statuses[action.rawValue] = true
+            } else {
+                statuses[action.rawValue] = false
             }
         }
+        registrationStatuses = statuses
     }
 
     deinit {

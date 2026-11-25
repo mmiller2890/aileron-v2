@@ -11,10 +11,12 @@ public struct EngineNotice: Identifiable, Equatable, Sendable {
     public let id = UUID()
     public let level: Level
     public let message: String
+    public let permissionAction: PermissionKind?
 
-    public init(level: Level, message: String) {
+    public init(level: Level, message: String, permissionAction: PermissionKind? = nil) {
         self.level = level
         self.message = message
+        self.permissionAction = permissionAction
     }
 }
 
@@ -30,6 +32,9 @@ public final class AileronEngine {
 
     public var speechStatus = SpeechModelStatus()
     public var telemetry = CaptureTelemetry()
+    public var permissions = PermissionsSnapshot()
+    public var showOnboarding: Bool = false
+    public var hotkeyStatuses: [UInt32: Bool] = [:]
     public var outputDevices: [AudioDeviceInfo] = []
     public var inputDevices: [AudioDeviceInfo] = []
     public var discoveredOllamaModels: [String] = []
@@ -60,6 +65,7 @@ public final class AileronEngine {
     public var onStealthSettingChanged: ((Bool) -> Void)?
     public var onHUDOpacityChanged: ((Double) -> Void)?
     public var onAppearanceChanged: ((AppearanceSettings) -> Void)?
+    public var onReregisterHotKeys: (() -> Void)?
 
     public init(
         keychain: KeychainStore = KeychainStore(),
@@ -70,6 +76,7 @@ public final class AileronEngine {
         self.speechEngine = speechEngine
         let loadedSettings = SettingsStore.load()
         self.settings = loadedSettings
+        self.showOnboarding = !loadedSettings.hasCompletedOnboarding
         self.currentSession = SessionRecord(
             title: Self.defaultSessionTitle(),
             profileId: loadedSettings.activeProfileId
@@ -82,6 +89,8 @@ public final class AileronEngine {
         }
 
         refreshAudioDevices()
+        refreshPermissions()
+        DiagnosticsLog.shared.record(category: "app", message: "AileronEngine initialized")
         Task {
             await bootstrapAsync()
         }
@@ -128,6 +137,78 @@ public final class AileronEngine {
     public func refreshAudioDevices() {
         outputDevices = AudioDeviceManager.outputDevices()
         inputDevices = AudioDeviceManager.inputDevices()
+    }
+
+    public func refreshPermissions() {
+        permissions.microphone = PermissionsService.currentMicrophoneState()
+        permissions.screenRecording = PermissionsService.currentScreenRecordingState()
+    }
+
+    public func requestPermission(_ kind: PermissionKind) {
+        Task {
+            switch kind {
+            case .microphone:
+                permissions.microphone = await PermissionsService.requestMicrophone()
+                DiagnosticsLog.shared.record(category: "permissions", message: "Microphone status: \(permissions.microphone.rawValue)")
+                if permissions.microphone == .denied {
+                    PermissionsService.openSystemSettings(for: .microphone)
+                }
+            case .screenRecording:
+                let granted = PermissionsService.requestScreenRecording()
+                permissions.screenRecording = granted ? .granted : .denied
+                DiagnosticsLog.shared.record(category: "permissions", message: "Screen recording status: \(permissions.screenRecording.rawValue)")
+                if !granted {
+                    PermissionsService.openSystemSettings(for: .screenRecording)
+                }
+            case .systemAudio:
+                let result = PermissionsService.probeSystemAudioTap()
+                permissions.systemAudio = result
+                DiagnosticsLog.shared.record(category: "permissions", message: "System audio probe: \(result.rawValue)")
+                if result != .granted {
+                    PermissionsService.openSystemSettings(for: .systemAudio)
+                }
+            }
+        }
+    }
+
+    public func openPermissionSettings(_ kind: PermissionKind) {
+        PermissionsService.openSystemSettings(for: kind)
+    }
+
+    public func completeOnboarding() {
+        settings.hasCompletedOnboarding = true
+        showOnboarding = false
+        saveSettings()
+    }
+
+    public func reopenOnboarding() {
+        refreshPermissions()
+        refreshAudioDevices()
+        showOnboarding = true
+    }
+
+    public func updateHotKeyStatuses(_ statuses: [UInt32: Bool], conflictedShortcuts: [String]) {
+        hotkeyStatuses = statuses
+        if !conflictedShortcuts.isEmpty {
+            let joined = conflictedShortcuts.joined(separator: ", ")
+            DiagnosticsLog.shared.record(category: "hotkeys", message: "Shortcut conflict: \(joined)")
+            bannerNotice = EngineNotice(
+                level: .warning,
+                message: "Shortcut already in use by another app: \(joined). Check Settings > Shortcuts."
+            )
+        } else {
+            DiagnosticsLog.shared.record(category: "hotkeys", message: "All global shortcuts registered")
+        }
+    }
+
+    public func exportDiagnosticReport(hotkeySummary: [String]) -> String {
+        DiagnosticsLog.shared.buildReport(
+            settings: settings,
+            speechStatus: speechStatus,
+            outputDevices: outputDevices,
+            inputDevices: inputDevices,
+            hotkeySummary: hotkeySummary
+        )
     }
 
     public func dismissNotice() {
@@ -266,8 +347,16 @@ public final class AileronEngine {
         let tap: SystemAudioTap
         do {
             tap = try SystemAudioTap(preferredOutputUID: preferredUID)
+            permissions.systemAudio = .granted
+            DiagnosticsLog.shared.record(category: "audio", message: "Started system audio tap on \(tap.boundDeviceName) at \(Int(tap.currentSampleRate)) Hz")
         } catch {
-            stopListening(reason: EngineNotice(level: .error, message: error.localizedDescription))
+            permissions.systemAudio = .denied
+            DiagnosticsLog.shared.record(category: "audio", message: "System audio tap failed: \(error.localizedDescription)")
+            stopListening(reason: EngineNotice(
+                level: .error,
+                message: error.localizedDescription,
+                permissionAction: .systemAudio
+            ))
             return
         }
 
@@ -550,11 +639,26 @@ public final class AileronEngine {
 
             micStreamTask = Task { [weak self] in
                 guard let self else { return }
+                let preferredMic = self.settings.inputDeviceId == "default" ? nil : self.settings.inputDeviceId
                 do {
-                    try await self.micCapture.start()
+                    try await self.micCapture.start(preferredInputUID: preferredMic)
+                    self.permissions.microphone = .granted
                     self.isRecordingMic = true
+                    DiagnosticsLog.shared.record(category: "mic", message: "Started live streaming mic dictation at \(Int(self.micCapture.sampleRate)) Hz")
                 } catch {
-                    self.bannerNotice = EngineNotice(level: .error, message: error.localizedDescription)
+                    let isDenied = (error as? MicCaptureError).map {
+                        if case .permissionDenied = $0 { return true }
+                        return false
+                    } ?? false
+                    if isDenied {
+                        self.permissions.microphone = .denied
+                    }
+                    DiagnosticsLog.shared.record(category: "mic", message: "Mic start failed: \(error.localizedDescription)")
+                    self.bannerNotice = EngineNotice(
+                        level: .error,
+                        message: error.localizedDescription,
+                        permissionAction: isDenied ? .microphone : nil
+                    )
                     return
                 }
 
@@ -618,7 +722,9 @@ public final class AileronEngine {
         Task {
             do {
                 let shot = try await ScreenCaptureService.captureActiveDisplay()
+                permissions.screenRecording = .granted
                 pendingScreenshot = shot
+                DiagnosticsLog.shared.record(category: "screen", message: "Captured display \(shot.width)x\(shot.height)")
                 if analyzeImmediately {
                     ask(
                         "Analyze what is on my screen right now and give me the clearest, highest-value answer or next step.",
@@ -629,7 +735,13 @@ public final class AileronEngine {
                     bannerNotice = EngineNotice(level: .info, message: "Screen captured (\(shot.width)x\(shot.height)) — attached to your next question.")
                 }
             } catch {
-                bannerNotice = EngineNotice(level: .error, message: error.localizedDescription)
+                permissions.screenRecording = .denied
+                DiagnosticsLog.shared.record(category: "screen", message: "Screen capture failed: \(error.localizedDescription)")
+                bannerNotice = EngineNotice(
+                    level: .error,
+                    message: error.localizedDescription,
+                    permissionAction: .screenRecording
+                )
             }
         }
     }

@@ -171,6 +171,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var hudOpacity: Double
     public var idleAutoStopMinutes: Int
     public var streamingLatency: StreamingLatencyPreset
+    public var hasCompletedOnboarding: Bool
     public var vad: VADSettings
     public var appearance: AppearanceSettings
 
@@ -190,6 +191,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         hudOpacity: Double = 0.96,
         idleAutoStopMinutes: Int = 20,
         streamingLatency: StreamingLatencyPreset = .ms320,
+        hasCompletedOnboarding: Bool = false,
         vad: VADSettings = VADSettings(),
         appearance: AppearanceSettings = AppearanceSettings()
     ) {
@@ -206,6 +208,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.hudOpacity = hudOpacity
         self.idleAutoStopMinutes = idleAutoStopMinutes
         self.streamingLatency = streamingLatency
+        self.hasCompletedOnboarding = hasCompletedOnboarding
         self.vad = vad
         self.appearance = appearance
     }
@@ -226,6 +229,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.hudOpacity = try container.decodeIfPresent(Double.self, forKey: .hudOpacity) ?? defaults.hudOpacity
         self.idleAutoStopMinutes = try container.decodeIfPresent(Int.self, forKey: .idleAutoStopMinutes) ?? defaults.idleAutoStopMinutes
         self.streamingLatency = try container.decodeIfPresent(StreamingLatencyPreset.self, forKey: .streamingLatency) ?? defaults.streamingLatency
+        self.hasCompletedOnboarding = try container.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? defaults.hasCompletedOnboarding
         self.vad = try container.decodeIfPresent(VADSettings.self, forKey: .vad) ?? defaults.vad
         self.appearance = try container.decodeIfPresent(AppearanceSettings.self, forKey: .appearance) ?? defaults.appearance
     }

@@ -206,6 +206,12 @@ private struct HUDContentView: View {
                         .foregroundStyle(theme.textPrimary)
                         .lineLimit(2)
                     Spacer()
+                    if let permissionKind = notice.permissionAction {
+                        Button("Open Settings") {
+                            engine.openPermissionSettings(permissionKind)
+                        }
+                        .buttonStyle(SoftButtonStyle(.subtle, compact: true))
+                    }
                     Button {
                         engine.dismissNotice()
                     } label: {

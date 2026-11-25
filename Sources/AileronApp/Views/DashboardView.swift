@@ -97,6 +97,12 @@ private struct DashboardRootContent: View {
             .background(theme.canvas)
         }
         .background(theme.canvas)
+        .sheet(isPresented: $engine.showOnboarding) {
+            OnboardingSheetView(engine: engine, onOpenModels: {
+                selectedTab = .models
+            })
+            .aileronTheme(engine.settings.appearance)
+        }
     }
 
     private var navigationSidebar: some View {
@@ -225,6 +231,12 @@ private struct DashboardRootContent: View {
                 .foregroundStyle(theme.textPrimary)
                 .lineLimit(2)
             Spacer()
+            if let permissionKind = notice.permissionAction {
+                Button("Open Settings") {
+                    engine.openPermissionSettings(permissionKind)
+                }
+                .buttonStyle(SoftButtonStyle(.subtle, compact: true))
+            }
             Button {
                 engine.dismissNotice()
             } label: {
