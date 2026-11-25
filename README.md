@@ -1,94 +1,110 @@
-# Aileron
+<p align="center">
+  <img src="assets/aileron-banner.svg" alt="Aileron — Native macOS Local-First AI Copilot" width="100%" />
+</p>
 
-**Aileron** is a native, local-first macOS AI copilot for live interviews, technical discussions, and meetings — built from the ground up in **Swift 6 + SwiftUI + FluidAudio** for Apple Silicon.
+<p align="center">
+  <img src="https://img.shields.io/badge/Swift-6.0-CF4636?style=for-the-badge&labelColor=121417" alt="Swift 6" />
+  <img src="https://img.shields.io/badge/macOS-14.2%2B-263B63?style=for-the-badge&labelColor=121417" alt="macOS 14.2+" />
+  <img src="https://img.shields.io/badge/Apple_Silicon-CoreML-D9A74A?style=for-the-badge&labelColor=121417" alt="Apple Silicon CoreML" />
+  <img src="https://img.shields.io/badge/Privacy-Local--First-72B2D4?style=for-the-badge&labelColor=121417" alt="Local-First" />
+</p>
 
-No Electron, no WebView, no Rust↔Swift FFI bridge, and no mandatory cloud accounts. System audio capture, voice activity detection, live streaming speech-to-text, speaker diarization, and session storage all run directly on your Mac.
+<h3 align="center">Built like a precision flight instrument — not a browser tab wrapped in a desktop shell.</h3>
 
----
+<p align="center">
+  <strong>Aileron</strong> is a native macOS AI copilot for technical interviews, architecture reviews, and live conversations.<br/>
+  Pure <strong>Swift 6 + SwiftUI + FluidAudio CoreML</strong> on Apple Silicon — zero Electron, zero WebView, zero virtual audio drivers, zero forced cloud accounts.
+</p>
 
-## Highlights
+<p align="center">
+  <img src="assets/deco-divider.svg" alt="" width="760" />
+</p>
 
-- **On-Device Speech Engine (FluidAudio CoreML):**
-  - **Parakeet TDT v3** for high-accuracy final transcripts.
-  - **Parakeet Realtime EOU** streaming live captions for **both system audio and microphone** with selectable chunk latency (**160 ms**, **320 ms recommended**, or **1280 ms**).
-  - **Silero CoreML VAD** with hysteresis, pre-speech buffering, and long-turn splitting.
-  - **Sortformer** live speaker labels with one-click speaker renaming (e.g., `Speaker 1` → `Interviewer`).
-- **Native System Audio & Microphone Capture:**
-  - Direct macOS 14.2+ **CoreAudio Process Tap** — no virtual audio drivers like BlackHole required.
-  - Automatic default-output tracking (seamlessly rebinds when you switch to AirPods or headphones) and configurable idle silence auto-stop.
-  - Real-time streaming microphone ask (`⌘⇧M`) so words appear live as you speak before refining and sending.
-- **Stealth Floating Bar & Collapsible Workspace:**
-  - Non-activating floating glass bar (`NSPanel`) with native **`NSWindow.SharingType.none`** screen-share invisibility (hidden from Zoom, Google Meet, Teams, and screen recordings).
-  - One-click **Return to App** (`pip.exit`) to dock the floating bar back into the main window, plus collapsible navigation, transcript, session, and prep sidebars (`⌘⌥S` / `⌘⌥T`).
-- **Slack-Style Theme Customization:**
-  - **System / Light / Dark** modes, curated presets (including vintage print-inspired **Pierre Péron**, **Mostra Noir**, **Villa Amore**, plus **Graphite**, **Aubergine**, **Midnight**, **Forest**, **Espresso**, **Rosewood**, and **Monochrome**).
-  - Custom 3-color picker (**Sidebar**, **Accent**, **Live Indicator**), **Window Gradient** toggle, spacing density, text size, and **paste-in Slack theme string** support.
-- **Flexible, Keychain-Secured AI Providers:**
-  - Native streaming (`URLSession.bytes`) for **Ollama** (auto-discovers local models + keep-alive warmup + reasoning toggle), **LM Studio**, **OpenAI**, **Anthropic**, **Google Gemini**, **Groq**, and **Custom OpenAI-compatible** endpoints.
-  - API keys are stored exclusively in **macOS Keychain** (`Security.framework`).
-- **Prep Profiles, Vision Q&A & Searchable Archive:**
-  - **Prep Profiles** let you save role context, answering style, resume metrics, STAR stories, and job descriptions so answers sound naturally in your own voice.
-  - **Screen Capture Q&A (`⌘⇧S`)** via native `ScreenCaptureKit` automatically excludes Aileron's own windows.
-  - **SQLite WAL + FTS5** session library with instant full-text search, AI executive summaries, and one-click **Markdown export**.
+## Why Aileron?
 
----
+An *aileron* keeps an aircraft level and responsive in real time without getting in the pilot's way. Aileron brings that same quiet discipline to your Mac:
 
-## Requirements
+- **Zero Browser Overhead:** One lightweight native macOS process linking `FluidAudio` directly — no Electron, no WKWebView, no Rust↔Swift FFI marshaling, and no base64 audio round-trips.
+- **On-Device Ears:** System audio is tapped straight from macOS CoreAudio (no BlackHole or virtual cables), segmented locally with **Silero CoreML VAD**, streamed live via **Parakeet Realtime EOU**, refined with **Parakeet TDT v3**, and speaker-labeled with **Sortformer**.
+- **Quietly Invisible:** Native `NSWindow.SharingType.none` hides both the floating bar and main workspace from Zoom, Google Meet, Microsoft Teams, and screen recordings.
+- **Yours to Style:** Calm collapsible sidebars paired with a Slack-inspired theme studio, vintage French poster palettes, and an unmistakable Art Deco emblem.
 
-- **Mac:** Apple Silicon (M1 / M2 / M3 / M4)
-- **OS:** macOS 14.2 Sonoma or newer (required for CoreAudio Process Tap)
-- **Toolchain (building from source):** Xcode 16+ or Swift 6 Command Line Tools
-- **Local AI (optional):** [Ollama](https://ollama.com) or [LM Studio](https://lmstudio.ai) — or use any cloud API key
+<p align="center">
+  <img src="assets/deco-divider.svg" alt="" width="760" />
+</p>
 
----
+## Key Capabilities
+
+### Real-Time Streaming on Both Sides of the Call
+- **System Audio (`⌘⇧A`):** CoreAudio Process Tap captures the far end directly, tracks default-output switches automatically (plug in AirPods mid-call without dropping a beat), filters out listening noises (`"Yeah."`, `"Mm-hmm."`), detects real questions, and streams answers in your own voice.
+- **Live Streaming Microphone (`⌘⇧M`):** Words stream into the bar as you speak — click **Send** when finished to polish with Parakeet TDT v3 and ask immediately, or **Cancel** to discard.
+- **Live Speaker Aliasing:** Click any speaker tag (`Speaker 1`) in the transcript drawer to rename them (`Interviewer`, `Sarah`) across the session and Markdown export.
+
+### Floating Bar ↔ Main Studio Flow
+- **Stealth Floating Bar (`⌘\`):** A sleek translucent pill that stays above full-screen apps and never steals focus until you type.
+- **Return to App (`pip.exit`):** Dock the floating bar straight back into the main window with a single click — or pop it back out anytime (`pip.enter`) without losing your live session.
+- **Collapsible Everything:** Hide the navigation sidebar (`⌘⌥S`), transcript drawer (`⌘⌥T`), session list, or profile list whenever you want a clean, single-column focus view.
+
+### Prep Profiles, Vision Q&A & Searchable Memory
+- **Prep Profiles:** Keep tailored profiles (System Design, Behavioral STAR, Executive Call) holding your resume metrics, key projects, and job description notes so answers sound like *you* — never generic AI boilerplate or `[X]` placeholders.
+- **Screen Vision Q&A (`⌘⇧S`):** Captures your active display via `ScreenCaptureKit` (automatically excluding Aileron's own windows) and streams visual analysis for code, diagrams, or slides.
+- **SQLite WAL + FTS5 Archive:** Every transcript, coaching answer, and generated Executive Brief is full-text searchable in milliseconds and exports cleanly to Markdown.
+
+<p align="center">
+  <img src="assets/deco-divider.svg" alt="" width="760" />
+</p>
+
+## Make It Yours — Slack-Style Themes & Vintage Print Palettes
+
+Open **Settings → Appearance** to tune the workspace live across both windows:
+
+<p align="center">
+  <img src="assets/aileron-themes.svg" alt="Aileron Theme Presets" width="100%" />
+</p>
+
+- **Color Modes:** `System`, `Light`, or `Dark` with automatic WCAG contrast adaptation.
+- **Curated Presets:** Vintage graphic print palettes (**Pierre Péron**, **Mostra Noir**, **Villa Amore**) alongside classic studio favorites (**Graphite**, **Aubergine**, **Midnight**, **Forest**, **Espresso**, **Rosewood**, **Monochrome**).
+- **Custom Theme Studio:** Pick any **Sidebar**, **Accent**, and **Live Indicator** color with native macOS color pickers, toggle **Window Gradient**, adjust spacing density & text size, or **paste a theme string straight from Slack Preferences**.
+
+<p align="center">
+  <img src="assets/deco-divider.svg" alt="" width="760" />
+</p>
 
 ## Quick Start
 
-### 1. Clone the repository
+### Requirements
+
+- **Apple Silicon Mac** (M1 / M2 / M3 / M4) running **macOS 14.2 Sonoma or newer**
+- **Xcode 16+** or **Swift 6** Command Line Tools
+- Optional: [Ollama](https://ollama.com) or [LM Studio](https://lmstudio.ai) for 100% offline AI (or any OpenAI / Anthropic / Gemini / Groq API key stored in macOS Keychain)
+
+### Build, Bundle & Launch (3 Steps)
 
 ```bash
 git clone https://github.com/mmiller2890/aileron-v2.git
 cd aileron-v2
-```
-
-### 2. Build and bundle `Aileron.app`
-
-```bash
 chmod +x scripts/bundle-app.sh scripts/generate-icon.swift
 ./scripts/bundle-app.sh release
-```
-
-> Use `./scripts/bundle-app.sh debug` for faster incremental builds during development.
-
-### 3. Launch Aileron
-
-```bash
 open build/Aileron.app
 ```
 
-To install it in your Applications folder:
+> **Tip:** Use `./scripts/bundle-app.sh debug` for quick incremental builds during development, or install permanently with `cp -R build/Aileron.app /Applications/Aileron.app`.
 
-```bash
-cp -R build/Aileron.app /Applications/Aileron.app
-```
+### First-Run Permissions
 
----
-
-## First-Run Setup
-
-### macOS Permissions
-
-Aileron requests permissions only when you use the corresponding feature:
+Aileron only asks for permissions when you trigger the feature that needs them:
 
 | Feature | macOS Permission | Where to Enable |
 |---|---|---|
-| System Audio Capture (`⌘⇧A`) | **System Audio Recording** | System Settings → Privacy & Security → Screen & System Audio Recording |
+| System Audio (`⌘⇧A`) | **System Audio Recording** | System Settings → Privacy & Security → Screen & System Audio Recording |
 | Voice Ask (`⌘⇧M`) | **Microphone** | System Settings → Privacy & Security → Microphone |
-| Screen Capture Q&A (`⌘⇧S`) | **Screen Recording** | System Settings → Privacy & Security → Screen & System Audio Recording |
+| Screen Q&A (`⌘⇧S`) | **Screen Recording** | System Settings → Privacy & Security → Screen & System Audio Recording |
 
-> Global keyboard shortcuts use native macOS Carbon hotkeys and do **not** require Accessibility permission.
+*Global shortcuts use native Carbon hotkeys — no Accessibility permission required.*
 
-### Local AI with Ollama (Optional, 100% Private)
+### Connect Your AI Provider
+
+**100% Local with Ollama:**
 
 ```bash
 brew install ollama
@@ -96,83 +112,85 @@ ollama serve
 ollama pull llama3.2
 ```
 
-Then open **Models → AI Model → Ollama (Local)** and click **Refresh** to select your installed model, or switch to OpenAI, Anthropic, Gemini, Groq, LM Studio, or any custom endpoint and save your API key in macOS Keychain.
+Open **Models → AI Model**, select **Ollama (Local)**, and click **Refresh** to auto-discover your local models. Prefer cloud models? Switch to **OpenAI**, **Anthropic**, **Google Gemini**, **Groq**, **LM Studio**, or **Custom OpenAI-Compatible** — API keys are stored strictly in **macOS Keychain** (`Security.framework`), never in plain-text config files.
 
-### On-Device Speech Models
-
-The first time you click **Listen** (or **Models → Load Models**), FluidAudio downloads and compiles the CoreML speech models locally to `~/Library/Application Support/FluidAudio/`. Subsequent launches load straight from disk.
-
----
-
-## Keyboard Shortcuts
-
-### Global Shortcuts (Work From Any App)
-
-| Shortcut | Action |
-|---|---|
-| `⌘\` | Show / Hide Floating Bar |
-| `⌘⇧D` | Open / Focus Main Window |
-| `⌘⇧A` | Start / Stop System Audio Listening |
-| `⌘⇧L` | Answer Last Utterance |
-| `⌘⇧S` | Capture Screen & Analyze |
-| `⌘⇧M` | Start / Send Live Streaming Voice Ask |
-
-### Window Layout Shortcuts
-
-| Shortcut | Action |
-|---|---|
-| `⌘⌥S` | Collapse / Expand Navigation Sidebar |
-| `⌘⌥T` | Collapse / Expand Live Transcript Panel |
-
----
+<p align="center">
+  <img src="assets/deco-divider.svg" alt="" width="760" />
+</p>
 
 ## Streaming Latency Guide
 
-You can choose your live streaming chunk size in **Settings → Audio & Capture → Streaming Chunk Latency**:
+Configure live caption responsiveness in **Settings → Audio & Capture → Streaming Chunk Latency**:
 
-| Setting | Latency | Accuracy | Best For |
+| Chunk Latency | Step Size (16 kHz) | Accuracy (LibriSpeech) | Best For |
 |---|---|---|---|
-| **160 ms** | Fastest | ~8–9% WER | Instant word-by-word visual feedback |
-| **320 ms (Default)** | ~⅓ second | **~5.7% WER** | Best balance of speed and accuracy |
-| **1280 ms** | ~1.3 seconds | Lowest CPU | Battery-conscious long sessions |
+| **160 ms** | 2,560 samples | ~8–9% WER | Fastest word-by-word visual feedback |
+| **320 ms (Default)** | 5,120 samples | **~5.7% WER (~14× RTFx)** | **Sweet spot** — crisp speed with ~35% fewer errors than 160 ms |
+| **1280 ms** | 20,480 samples | Lowest compute | Ultra-low CPU wakeups for long calls |
 
-Regardless of streaming chunk size, finished utterances are refined by **Parakeet TDT v3** for final accuracy and punctuation.
+*Every finished utterance is still refined by **Parakeet TDT v3** for final accuracy and punctuation.*
 
----
+<p align="center">
+  <img src="assets/deco-divider.svg" alt="" width="760" />
+</p>
 
-## Development & Testing
+## Keyboard Shortcuts
 
-Run the unit test suite (`AileronCoreTests`):
+| Shortcut | Scope | Action |
+|---|---|---|
+| `⌘\` | Global | Show / Hide Floating Bar |
+| `⌘⇧D` | Global | Open / Focus Main Window |
+| `⌘⇧A` | Global | Start / Stop System Audio Listening |
+| `⌘⇧L` | Global | Answer Last Utterance |
+| `⌘⇧S` | Global | Capture Screen & Analyze |
+| `⌘⇧M` | Global | Start / Send Streaming Voice Ask |
+| `⌘⌥S` | Window | Collapse / Expand Navigation Sidebar |
+| `⌘⌥T` | Window | Collapse / Expand Live Transcript Panel |
+
+<p align="center">
+  <img src="assets/deco-divider.svg" alt="" width="760" />
+</p>
+
+## Architecture & Testing
+
+```text
+aileron-v2/
+├── Sources/
+│   ├── AileronCore/
+│   │   ├── Audio/      # CoreAudio Process Tap, MicCapture, AudioRingBuffer, Preprocessor, VAD Segmenter
+│   │   ├── Speech/     # Direct FluidAudio SpeechEngine (Parakeet v3, EOU Streaming, Sortformer) & Heuristics
+│   │   ├── AI/         # Typed URLSession.bytes SSE/NDJSON AIClient & PromptComposer
+│   │   ├── Capture/    # Native ScreenCaptureKit display capture
+│   │   ├── Storage/    # macOS KeychainStore, WAL SQLite3 + FTS5 DatabaseStore, SettingsStore
+│   │   ├── Models/     # Domain, Settings, and Slack-compatible Theme models
+│   │   └── Engine/     # @MainActor @Observable AileronEngine (single source of truth)
+│   └── AileronApp/
+│       ├── Theme/      # Dynamic ResolvedTheme, Art Deco Emblem & Wordmark, SwiftUI controls
+│       ├── Windows/    # Non-activating Stealth NSPanel, Dashboard NSWindow, Carbon HotKeyManager
+│       └── Views/      # HUD, Live Studio, Sessions, Prep Profiles, Models, Appearance & Settings
+├── Tests/
+│   └── AileronCoreTests/
+├── assets/             # Graphic-print Art Deco SVG banner, emblem, dividers & theme swatches
+└── scripts/            # AppIcon.icns generator & Aileron.app bundler
+```
+
+Run the core unit test suite:
 
 ```bash
 swift test
 ```
 
-### Project Layout
+<p align="center">
+  <img src="assets/deco-divider.svg" alt="" width="760" />
+</p>
 
-```text
-Sources/
-  AileronCore/
-    Audio/          # CoreAudio Process Tap, MicCapture, RingBuffer, Preprocessor, VAD Segmenter
-    Speech/         # Direct FluidAudio SpeechEngine (Parakeet v3, EOU Streaming, Sortformer) & heuristics
-    AI/             # Typed SSE/NDJSON AIClient & PromptComposer
-    Capture/        # ScreenCaptureKit screenshot service
-    Storage/        # macOS KeychainStore, WAL SQLite3 + FTS5 DatabaseStore, SettingsStore
-    Models/         # Domain, Settings, and Theme models
-    Engine/         # @MainActor @Observable AileronEngine
-  AileronApp/
-    Theme/          # Dynamic ResolvedTheme, Art Deco logo/wordmark, native SwiftUI controls
-    Windows/        # Stealth NSPanel, Dashboard NSWindow, Carbon HotKeyManager
-    Views/          # HUDView, DashboardView, LiveStudioView, Sessions, Prep, Models, Settings
-Tests/
-  AileronCoreTests/ # Ring buffer, soft clipper, VAD segmenter, FTS5 SQLite, SSE & theme parsing tests
-scripts/
-  bundle-app.sh     # Builds, generates AppIcon.icns, packages, and ad-hoc signs Aileron.app
-  generate-icon.swift
-```
+## Design Ethos & Colophon
 
----
+<p align="center">
+  <img src="assets/aileron-emblem.svg" alt="Aileron Graphic Art Deco Emblem" width="88" />
+</p>
 
-## Design Reference
-
-- Graphic Art Deco logo & typography direction: [Fonts In Use — Art Deco](https://fontsinuse.com/tags/2431/art-deco)
+<p align="center">
+  Visual identity inspired by interwar French lithographic posters and geometric modernist typography — <em>Pierre Péron</em>, <em>Mostra Nuova</em>, <em>Villa Amore</em>, and <em>Kornog</em>.<br/>
+  Design reference archive: <a href="https://fontsinuse.com/tags/2431/art-deco">Fonts In Use — Art Deco</a>
+</p>

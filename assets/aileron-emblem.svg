@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Aileron Graphic Art Deco Emblem">
+  <defs>
+    <clipPath id="squircle">
+      <rect x="32" y="32" width="448" height="448" rx="96" ry="96"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#squircle)">
+    <rect x="32" y="32" width="448" height="448" fill="#121417"/>
+    <polygon points="0,0 333,0 174,512 0,512" fill="#263B63"/>
+    <polygon points="384,0 512,0 512,512 333,512" fill="#F2EAD9"/>
+    <polygon points="404,0 412,0 366,512 358,512" fill="#CF4636"/>
+    <polygon points="426,0 434,0 388,512 380,512" fill="#CF4636"/>
+    <polygon points="448,0 456,0 410,512 402,512" fill="#CF4636"/>
+
+    <polygon points="130,69 382,69 382,100 412,100 412,130 443,130 443,382 412,382 412,412 382,412 382,443 130,443 130,412 100,412 100,382 69,382 69,130 100,130 100,100 130,100" fill="none" stroke="#121417" stroke-width="16"/>
+    <polygon points="130,69 382,69 382,100 412,100 412,130 443,130 443,382 412,382 412,412 382,412 382,443 130,443 130,412 100,412 100,382 69,382 69,130 100,130 100,100 130,100" fill="none" stroke="#F2EAD9" stroke-width="7.5"/>
+
+    <g transform="translate(97, 97) scale(3.18)">
+      <polygon points="2,55 34,55 32,59.5 5.2,59.5" fill="#72B2D4"/>
+      <polygon points="7,63 34,63 32,67.5 10.2,67.5" fill="#F2EAD9"/>
+      <polygon points="12,71 34,71 32,75.5 15.2,75.5" fill="#D9A74A"/>
+
+      <polygon points="66,55 98,55 94.8,59.5 68,59.5" fill="#CF4636"/>
+      <polygon points="66,63 93,63 89.8,67.5 68,67.5" fill="#121417"/>
+      <polygon points="66,71 88,71 84.8,75.5 68,75.5" fill="#D9A74A"/>
+
+      <polygon points="28,71 72,71 72,77.5 28,77.5" fill="#D9A74A"/>
+      <polygon points="50,5 15,89 34,89 50,44" fill="#F2EAD9"/>
+      <polygon points="50,5 85,89 66,89 50,44" fill="#CF4636"/>
+      <polygon points="48.5,20 22.5,84 25.5,84 48.5,27.5" fill="#121417"/>
+      <polygon points="50,51 57,61.5 50,68.5 43,61.5" fill="#72B2D4"/>
+      <rect x="15" y="92.5" width="70" height="4" fill="#F2EAD9"/>
+    </g>
+  </g>
+  <rect x="32" y="32" width="448" height="448" rx="96" ry="96" fill="none" stroke="#F2EAD9" stroke-opacity="0.38" stroke-width="6"/>
+</svg>

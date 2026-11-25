@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 138" width="1000" height="138" role="img" aria-label="Aileron Slack-Style and Editorial Art Deco Theme Presets">
+  <rect x="0" y="0" width="1000" height="138" rx="12" fill="#121417"/>
+  <rect x="1" y="1" width="998" height="136" rx="11" fill="none" stroke="#F2EAD9" stroke-opacity="0.16" stroke-width="1.5"/>
+
+  <g transform="translate(20, 18)">
+    <g transform="translate(0, 0)">
+      <rect x="0" y="0" width="148" height="72" rx="8" fill="#181A1E" stroke="#F2EAD9" stroke-opacity="0.18"/>
+      <rect x="0" y="0" width="46" height="72" rx="8" fill="#243456"/>
+      <rect x="38" y="0" width="8" height="72" fill="#243456"/>
+      <circle cx="14" cy="16" r="4" fill="#6CB6D9"/>
+      <rect x="10" y="28" width="26" height="6" rx="2" fill="#D1493B"/>
+      <rect x="10" y="40" width="20" height="4" rx="2" fill="#F2EAD9" fill-opacity="0.4"/>
+      <rect x="60" y="16" width="68" height="6" rx="2" fill="#F2EAD9" fill-opacity="0.75"/>
+      <rect x="60" y="28" width="52" height="4" rx="2" fill="#F2EAD9" fill-opacity="0.28"/>
+      <rect x="106" y="48" width="28" height="12" rx="3" fill="#D1493B"/>
+      <text x="74" y="94" text-anchor="middle" fill="#F2EAD9" font-family="Avenir Next, Helvetica Neue, sans-serif" font-size="12" font-weight="600" letter-spacing="1.2">PIERRE PÉRON</text>
+    </g>
+
+    <g transform="translate(162, 0)">
+      <rect x="0" y="0" width="148" height="72" rx="8" fill="#14171C" stroke="#F2EAD9" stroke-opacity="0.18"/>
+      <rect x="0" y="0" width="46" height="72" rx="8" fill="#11181F"/>
+      <rect x="38" y="0" width="8" height="72" fill="#11181F"/>
+      <circle cx="14" cy="16" r="4" fill="#E8934A"/>
+      <rect x="10" y="28" width="26" height="6" rx="2" fill="#7FC5D6"/>
+      <rect x="10" y="40" width="20" height="4" rx="2" fill="#F2EAD9" fill-opacity="0.4"/>
+      <rect x="60" y="16" width="68" height="6" rx="2" fill="#F2EAD9" fill-opacity="0.75"/>
+      <rect x="60" y="28" width="52" height="4" rx="2" fill="#F2EAD9" fill-opacity="0.28"/>
+      <rect x="106" y="48" width="28" height="12" rx="3" fill="#7FC5D6"/>
+      <text x="74" y="94" text-anchor="middle" fill="#F2EAD9" font-family="Avenir Next, Helvetica Neue, sans-serif" font-size="12" font-weight="600" letter-spacing="1.2">MOSTRA NOIR</text>
+    </g>
+
+    <g transform="translate(324, 0)">
+      <rect x="0" y="0" width="148" height="72" rx="8" fill="#181A1E" stroke="#F2EAD9" stroke-opacity="0.18"/>
+      <rect x="0" y="0" width="46" height="72" rx="8" fill="#2F3E46"/>
+      <rect x="38" y="0" width="8" height="72" fill="#2F3E46"/>
+      <circle cx="14" cy="16" r="4" fill="#52B7A8"/>
+      <rect x="10" y="28" width="26" height="6" rx="2" fill="#D49B54"/>
+      <rect x="10" y="40" width="20" height="4" rx="2" fill="#F2EAD9" fill-opacity="0.4"/>
+      <rect x="60" y="16" width="68" height="6" rx="2" fill="#F2EAD9" fill-opacity="0.75"/>
+      <rect x="60" y="28" width="52" height="4" rx="2" fill="#F2EAD9" fill-opacity="0.28"/>
+      <rect x="106" y="48" width="28" height="12" rx="3" fill="#D49B54"/>
+      <text x="74" y="94" text-anchor="middle" fill="#F2EAD9" font-family="Avenir Next, Helvetica Neue, sans-serif" font-size="12" font-weight="600" letter-spacing="1.2">VILLA AMORE</text>
+    </g>
+
+    <g transform="translate(486, 0)">
+      <rect x="0" y="0" width="148" height="72" rx="8" fill="#181A1E" stroke="#F2EAD9" stroke-opacity="0.18"/>
+      <rect x="0" y="0" width="46" height="72" rx="8" fill="#3F0E40"/>
+      <rect x="38" y="0" width="8" height="72" fill="#3F0E40"/>
+      <circle cx="14" cy="16" r="4" fill="#2BAC76"/>
+      <rect x="10" y="28" width="26" height="6" rx="2" fill="#C084FC"/>
+      <rect x="10" y="40" width="20" height="4" rx="2" fill="#F2EAD9" fill-opacity="0.4"/>
+      <rect x="60" y="16" width="68" height="6" rx="2" fill="#F2EAD9" fill-opacity="0.75"/>
+      <rect x="60" y="28" width="52" height="4" rx="2" fill="#F2EAD9" fill-opacity="0.28"/>
+      <rect x="106" y="48" width="28" height="12" rx="3" fill="#C084FC"/>
+      <text x="74" y="94" text-anchor="middle" fill="#F2EAD9" font-family="Avenir Next, Helvetica Neue, sans-serif" font-size="12" font-weight="600" letter-spacing="1.2">AUBERGINE</text>
+    </g>
+
+    <g transform="translate(648, 0)">
+      <rect x="0" y="0" width="148" height="72" rx="8" fill="#181A1E" stroke="#F2EAD9" stroke-opacity="0.18"/>
+      <rect x="0" y="0" width="46" height="72" rx="8" fill="#132A22"/>
+      <rect x="38" y="0" width="8" height="72" fill="#132A22"/>
+      <circle cx="14" cy="16" r="4" fill="#5EEAD4"/>
+      <rect x="10" y="28" width="26" height="6" rx="2" fill="#34C78A"/>
+      <rect x="10" y="40" width="20" height="4" rx="2" fill="#F2EAD9" fill-opacity="0.4"/>
+      <rect x="60" y="16" width="68" height="6" rx="2" fill="#F2EAD9" fill-opacity="0.75"/>
+      <rect x="60" y="28" width="52" height="4" rx="2" fill="#F2EAD9" fill-opacity="0.28"/>
+      <rect x="106" y="48" width="28" height="12" rx="3" fill="#34C78A"/>
+      <text x="74" y="94" text-anchor="middle" fill="#F2EAD9" font-family="Avenir Next, Helvetica Neue, sans-serif" font-size="12" font-weight="600" letter-spacing="1.2">FOREST</text>
+    </g>
+
+    <g transform="translate(810, 0)">
+      <rect x="0" y="0" width="148" height="72" rx="8" fill="#FFFFFF" stroke="#F2EAD9" stroke-opacity="0.28"/>
+      <rect x="0" y="0" width="46" height="72" rx="8" fill="#ECEEF2"/>
+      <rect x="38" y="0" width="8" height="72" fill="#ECEEF2"/>
+      <circle cx="14" cy="16" r="4" fill="#34C78A"/>
+      <rect x="10" y="28" width="26" height="6" rx="2" fill="#60A5FA"/>
+      <rect x="10" y="40" width="20" height="4" rx="2" fill="#111827" fill-opacity="0.25"/>
+      <rect x="60" y="16" width="68" height="6" rx="2" fill="#111827" fill-opacity="0.72"/>
+      <rect x="60" y="28" width="52" height="4" rx="2" fill="#111827" fill-opacity="0.22"/>
+      <rect x="106" y="48" width="28" height="12" rx="3" fill="#60A5FA"/>
+      <text x="74" y="94" text-anchor="middle" fill="#F2EAD9" font-family="Avenir Next, Helvetica Neue, sans-serif" font-size="12" font-weight="600" letter-spacing="1.2">+ LIGHT / CUSTOM</text>
+    </g>
+  </g>
+</svg>
