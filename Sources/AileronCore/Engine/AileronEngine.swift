@@ -879,7 +879,8 @@ public final class AileronEngine {
                    self.currentSession.exchanges[idx].response.isEmpty {
                     self.currentSession.exchanges[idx].response = "_Error: \(error.localizedDescription)_"
                 }
-                DiagnosticsLog.shared.record(category: "ai", message: "AI stream failed: \(error.localizedDescription)")
+                let logDetail = (error as? AIClientError)?.safeLogSummary ?? "stream_error"
+                DiagnosticsLog.shared.record(category: "ai", message: "AI stream failed: \(logDetail)")
                 self.bannerNotice = EngineNotice(level: .error, message: error.localizedDescription)
                 self.schedulePersistSession()
             }

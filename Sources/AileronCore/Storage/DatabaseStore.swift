@@ -39,6 +39,14 @@ public actor DatabaseStore {
         }
         self.db = validHandle
         try Self.bootstrapSchema(db: validHandle)
+        if resolvedPath != ":memory:" {
+            for suffix in ["", "-wal", "-shm"] {
+                let candidate = URL(fileURLWithPath: resolvedPath + suffix)
+                if FileManager.default.fileExists(atPath: candidate.path) {
+                    SettingsStore.enforcePrivatePermissions(at: candidate, isDirectory: false)
+                }
+            }
+        }
     }
 
     deinit {

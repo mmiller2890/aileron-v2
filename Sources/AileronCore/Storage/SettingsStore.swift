@@ -1,11 +1,22 @@
+import Darwin
 import Foundation
 
 public enum SettingsStore {
+    public static func enforcePrivatePermissions(at url: URL, isDirectory: Bool = false) {
+        let mode: mode_t = isDirectory ? 0o700 : 0o600
+        _ = chmod(url.path, mode)
+    }
+
     public static func appSupportDirectory() -> URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? FileManager.default.temporaryDirectory
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support", isDirectory: true)
         let dir = base.appendingPathComponent("Aileron", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(
+            at: dir,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+        enforcePrivatePermissions(at: dir, isDirectory: true)
         return dir
     }
 
@@ -25,6 +36,8 @@ public enum SettingsStore {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         guard let data = try? encoder.encode(settings) else { return }
-        try? data.write(to: settingsURL, options: .atomic)
+        let url = settingsURL
+        try? data.write(to: url, options: .atomic)
+        enforcePrivatePermissions(at: url, isDirectory: false)
     }
 }

@@ -1,3 +1,4 @@
+import AileronCore
 import AppKit
 import SwiftUI
 
@@ -25,6 +26,7 @@ public struct MarkdownTextView: View {
     @Environment(\.aileronTheme) private var theme
     public let markdown: String
     public let fontSize: CGFloat?
+    @State private var pendingExternalURL: URL?
 
     public init(_ markdown: String, fontSize: CGFloat? = nil) {
         self.markdown = markdown
@@ -88,13 +90,43 @@ public struct MarkdownTextView: View {
         }
         .textSelection(.enabled)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .environment(\.openURL, OpenURLAction { url in
+            guard AIClient.isSafeExternalURL(url) else {
+                return .discarded
+            }
+            pendingExternalURL = url
+            return .handled
+        })
+        .alert(
+            "Open External Link?",
+            isPresented: Binding(
+                get: { pendingExternalURL != nil },
+                set: { if !$0 { pendingExternalURL = nil } }
+            ),
+            presenting: pendingExternalURL
+        ) { url in
+            Button("Open") {
+                NSWorkspace.shared.open(url)
+                pendingExternalURL = nil
+            }
+            Button("Cancel", role: .cancel) {
+                pendingExternalURL = nil
+            }
+        } message: { url in
+            Text("Aileron wants to open:\n\(url.absoluteString)")
+        }
     }
 
     private func inlineMarkdown(_ text: String) -> Text {
         let options = AttributedString.MarkdownParsingOptions(
             interpretedSyntax: .inlineOnlyPreservingWhitespace
         )
-        if let attr = try? AttributedString(markdown: text, options: options) {
+        if var attr = try? AttributedString(markdown: text, options: options) {
+            for run in attr.runs {
+                if let url = run.link, !AIClient.isSafeExternalURL(url) {
+                    attr[run.range].link = nil
+                }
+            }
             return Text(attr)
         }
         return Text(text)

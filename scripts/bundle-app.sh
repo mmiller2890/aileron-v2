@@ -82,9 +82,30 @@ cat > "$CONTENTS_DIR/Info.plist" <<'PLIST'
     <string>Aileron taps system audio locally on your Mac to transcribe interviews and meetings in real time.</string>
     <key>NSScreenCaptureUsageDescription</key>
     <string>Aileron captures your active screen when you request visual Q&amp;A.</string>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <false/>
+        <key>NSAllowsLocalNetworking</key>
+        <true/>
+    </dict>
 </dict>
 </plist>
 PLIST
 
-codesign --force --deep --sign - "$BUNDLE_DIR"
+ENTITLEMENTS="$ROOT_DIR/entitlements/Aileron.entitlements"
+SIGN_IDENTITY="${AILERON_SIGN_IDENTITY:--}"
+SIGN_ARGS=(--force --options runtime --entitlements "$ENTITLEMENTS" --sign "$SIGN_IDENTITY")
+if [ "$SIGN_IDENTITY" != "-" ]; then
+  SIGN_ARGS+=(--timestamp)
+fi
+
+for nested in "$RESOURCES_DIR"/*.bundle; do
+  if [ -d "$nested/Contents/MacOS" ]; then
+    codesign --force --sign "$SIGN_IDENTITY" "$nested"
+  fi
+done
+
+codesign "${SIGN_ARGS[@]}" "$BUNDLE_DIR"
+codesign --verify --strict --verbose=2 "$BUNDLE_DIR"
 echo "Built bundle: $BUNDLE_DIR"

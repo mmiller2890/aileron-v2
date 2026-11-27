@@ -50,14 +50,15 @@ public final class KeychainStore: SecretStore, @unchecked Sendable {
         ]
 
         let updateAttrs: [String: Any] = [
-            kSecValueData as String: data
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
         ]
 
         let updateStatus = SecItemUpdate(baseQuery as CFDictionary, updateAttrs as CFDictionary)
         if updateStatus == errSecItemNotFound {
             var addQuery = baseQuery
             addQuery[kSecValueData as String] = data
-            addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+            addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
             let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
             guard addStatus == errSecSuccess else {
                 throw KeychainStoreError.osStatus(addStatus)
@@ -66,7 +67,7 @@ public final class KeychainStore: SecretStore, @unchecked Sendable {
             throw KeychainStoreError.osStatus(updateStatus)
         }
 
-        guard secret(for: account) == trimmed else {
+        guard hasSecret(for: account) else {
             throw KeychainStoreError.readbackMismatch
         }
     }
@@ -103,6 +104,14 @@ public final class KeychainStore: SecretStore, @unchecked Sendable {
     }
 
     public func hasSecret(for account: String) -> Bool {
-        secret(for: account) != nil
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnAttributes as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var result: AnyObject?
+        return SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess
     }
 }

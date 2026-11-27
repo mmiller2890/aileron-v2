@@ -178,11 +178,12 @@ aileron-v2/
 │       └── Views/      # HUD, Live Studio, Onboarding, Sessions, Prep Profiles, Models, Appearance & Settings
 ├── Tests/
 │   └── AileronCoreTests/
+├── entitlements/       # Minimal Hardened Runtime entitlements
 ├── assets/             # Graphic-print Art Deco SVG banner, emblem, dividers & theme swatches
-└── scripts/            # AppIcon.icns generator & Aileron.app bundler
+└── scripts/            # AppIcon.icns generator & Hardened Runtime Aileron.app bundler
 ```
 
-Run the core unit test suite (`12` tests covering audio buffering, speech heuristics, prompt framing, themes, and SQLite FTS5):
+Run the core unit test suite (`15` tests covering audio buffering, speech heuristics, endpoint/model security, prompt fencing, diagnostics redaction, storage permissions, themes, and SQLite FTS5):
 
 ```bash
 swift test

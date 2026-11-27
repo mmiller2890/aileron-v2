@@ -20,10 +20,45 @@ public final class DiagnosticsLog: @unchecked Sendable {
         self.formatter = fmt
     }
 
+    private static let secretPatterns: [(NSRegularExpression, String)] = {
+        let specs: [(String, String)] = [
+            (#"(?i)bearer\s+[A-Za-z0-9._\-+/=]{8,}"#, "Bearer [REDACTED]"),
+            (#"\b(?:sk-[A-Za-z0-9_\-]{12,}|AIza[A-Za-z0-9_\-]{16,}|gsk_[A-Za-z0-9_\-]{12,}|xai-[A-Za-z0-9_\-]{12,})\b"#, "[REDACTED_KEY]"),
+            (#"(?i)([?&](?:key|api_key|apikey|token|secret)=)[^&\s]+"#, "$1[REDACTED]")
+        ]
+        return specs.compactMap { pattern, replacement in
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+            return (regex, replacement)
+        }
+    }()
+
+    private static let possessivePrefixRegex = try? NSRegularExpression(
+        pattern: #"^[^\s']{1,32}['’]s\s+"#,
+        options: []
+    )
+
+    public static func sanitize(_ text: String) -> String {
+        var result = text
+        for (regex, replacement) in secretPatterns {
+            let range = NSRange(result.startIndex..<result.endIndex, in: result)
+            result = regex.stringByReplacingMatches(in: result, range: range, withTemplate: replacement)
+        }
+        return result
+    }
+
+    public static func sanitizeDeviceName(_ name: String) -> String {
+        guard let regex = possessivePrefixRegex else { return name }
+        let range = NSRange(name.startIndex..<name.endIndex, in: name)
+        let stripped = regex.stringByReplacingMatches(in: name, range: range, withTemplate: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return stripped.isEmpty ? name : stripped
+    }
+
     public func record(category: String, message: String) {
         let timestamp = formatter.string(from: Date())
-        let line = "[\(timestamp)] [\(category)] \(message)"
-        logger.info("\(line, privacy: .public)")
+        let safeMessage = Self.sanitize(message)
+        let line = "[\(timestamp)] [\(category)] \(safeMessage)"
+        logger.info("\(line, privacy: .private)")
         lock.withLock { state in
             state.entries.append(line)
             if state.entries.count > maxEntries {
@@ -65,16 +100,16 @@ public final class DiagnosticsLog: @unchecked Sendable {
         lines.append("- Live Text Ready: \(speechStatus.liveTextReady)")
         lines.append("- Speaker Labels Ready: \(speechStatus.speakerLabelsReady)")
         if let err = speechStatus.lastError {
-            lines.append("- Last Speech Error: \(err)")
+            lines.append("- Last Speech Error: \(Self.sanitize(err))")
         }
         lines.append("")
         lines.append("Audio Output Devices (\(outputDevices.count)):")
         for dev in outputDevices {
-            lines.append("- \(dev.name)\(dev.isDefault ? " [default]" : "")")
+            lines.append("- \(Self.sanitizeDeviceName(dev.name))\(dev.isDefault ? " [default]" : "")")
         }
         lines.append("Audio Input Devices (\(inputDevices.count)):")
         for dev in inputDevices {
-            lines.append("- \(dev.name)\(dev.isDefault ? " [default]" : "")")
+            lines.append("- \(Self.sanitizeDeviceName(dev.name))\(dev.isDefault ? " [default]" : "")")
         }
         if !hotkeySummary.isEmpty {
             lines.append("")
