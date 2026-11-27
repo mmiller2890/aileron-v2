@@ -88,7 +88,7 @@ Downloads the latest Apple Silicon release, verifies its SHA-256 checksum, insta
 
 ### Option 2: Direct Download (`.dmg` or `.zip`)
 
-Download `Aileron-v2.0.0-arm64.dmg` from the **[Latest GitHub Release](https://github.com/mmiller2890/aileron-v2/releases/latest)** and drag **Aileron** into **Applications**.
+Download `Aileron-v2.0.1-arm64.dmg` from the **[Latest GitHub Release](https://github.com/mmiller2890/aileron-v2/releases/latest)** and drag **Aileron** into **Applications**.
 
 > **First-open macOS note:** Aileron is currently ad-hoc signed (not Apple-notarized). If macOS warns when opening a browser-downloaded `.dmg`, run `xattr -cr /Applications/Aileron.app` once in Terminal — or use the one-line installer above.
 
@@ -185,16 +185,16 @@ aileron-v2/
 ├── Sources/
 │   ├── CSileroVad/     # MIT-licensed embedded 32 ms NEON Silero VAD C engine (zero runtime download)
 │   ├── AileronCore/
-│   │   ├── Audio/      # CoreAudio Process Tap, MicCapture, AudioDeviceManager, RingBuffer, Preprocessor, VAD Segmenter
-│   │   ├── Speech/     # Direct FluidAudio SpeechEngine (Parakeet v3, EOU Streaming, Sortformer) & QuestionGate/Heuristics
+│   │   ├── Audio/      # CoreAudio Process Tap, MicCapture, AudioDeviceManager, Lock-Free SPSC RingBuffer, Sinc Resampler, VAD Segmenter
+│   │   ├── Speech/     # Direct FluidAudio SpeechEngine (Parakeet v3, EOU Streaming, Sortformer), 32 ms Silero VAD & QuestionGate
 │   │   ├── AI/         # Typed URLSession.bytes SSE/NDJSON AIClient & direct-answer PromptComposer
 │   │   ├── Capture/    # Native ScreenCaptureKit display capture
-│   │   ├── Storage/    # macOS KeychainStore, WAL SQLite3 + FTS5 DatabaseStore, SettingsStore
+│   │   ├── Storage/    # macOS KeychainStore, incremental WAL SQLite3 + FTS5 DatabaseStore, SettingsStore
 │   │   ├── System/     # Live PermissionsService & privacy-safe DiagnosticsLog
-│   │   ├── Models/     # Domain, Settings, and Slack-compatible Theme models
-│   │   └── Engine/     # @MainActor @Observable AileronEngine (queued auto-answers & live pipeline state)
+│   │   ├── Models/     # Domain, Settings, and Theme models
+│   │   └── Engine/     # Modular @MainActor @Observable AileronEngine (+Capture, +AI, +Sessions)
 │   └── AileronApp/
-│       ├── Theme/      # Dynamic ResolvedTheme, Art Deco Emblem & Wordmark, SwiftUI controls
+│       ├── Theme/      # Dynamic ResolvedTheme, AileronBranding (Art Deco Emblem & Wordmark), SwiftUI controls
 │       ├── Windows/    # Non-activating Stealth NSPanel, Dashboard NSWindow, conflict-aware Carbon HotKeyManager
 │       └── Views/      # HUD, Live Studio, Onboarding, Sessions, Prep Profiles, Models, Appearance & Settings
 ├── Tests/
@@ -205,7 +205,7 @@ aileron-v2/
 └── scripts/            # AppIcon.icns generator, Hardened Runtime bundler & .dmg/.zip release packager
 ```
 
-Run the core unit test suite (`20` tests covering 32 ms VAD gap separation, long-turn preservation, end-to-end capture-to-answer queueing, cancellation safety, Keychain caching, endpoint/model security, prompt fencing, diagnostics redaction, storage permissions, themes, and SQLite FTS5):
+Run the core unit test suite (`25` tests covering concurrent SPSC ring buffering, anti-aliased resampling, 32 ms VAD gap separation, long-turn preservation, end-to-end capture-to-answer queueing, cancellation safety, Keychain caching, incremental SQLite + migrations, settings recovery, endpoint/model security, prompt fencing, diagnostics redaction, and malformed streams):
 
 ```bash
 swift test

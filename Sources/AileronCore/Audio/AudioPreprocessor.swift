@@ -12,13 +12,18 @@ public struct AudioLevelMetrics: Equatable, Sendable {
 }
 
 public final class AudioPreprocessor {
+    private static let polyphasePhases = 64
+
     public var targetRMS: Float
     public var maxGain: Float
     public var noiseGateThreshold: Float
     private var smoothedGain: Float = 1.0
-    private var fractionalPosition: Double = 0
-    private var previousSample: Float = 0
-    private var hasPreviousSample: Bool = false
+    private var configuredInputRate: Double = 0
+    private var halfTaps: Int = 0
+    private var tapsPerPhase: Int = 0
+    private var polyphaseTable: [Float] = []
+    private var resampleBuffer: [Float] = []
+    private var resamplePos: Double = 0
 
     public init(
         targetRMS: Float = 0.14,
@@ -32,9 +37,63 @@ public final class AudioPreprocessor {
 
     public func reset() {
         smoothedGain = 1.0
-        fractionalPosition = 0
-        previousSample = 0
-        hasPreviousSample = false
+        configuredInputRate = 0
+        halfTaps = 0
+        tapsPerPhase = 0
+        polyphaseTable.removeAll(keepingCapacity: true)
+        resampleBuffer.removeAll(keepingCapacity: true)
+        resamplePos = 0
+    }
+
+    private func configureResampler(inputSampleRate: Double) {
+        let ratio = inputSampleRate / 16_000.0
+        let cutoff = 0.45 * min(1.0, 1.0 / ratio)
+        let half = max(8, min(24, Int(ceil(4.0 * max(1.0, ratio)))))
+        let taps = half * 2
+        let phases = Self.polyphasePhases
+
+        var table = [Float](repeating: 0, count: phases * taps)
+        let halfDouble = Double(half)
+        for p in 0..<phases {
+            let frac = Double(p) / Double(phases)
+            var sum = 0.0
+            let rowOffset = p * taps
+            for k in 0..<taps {
+                let x = Double(k - half + 1) - frac
+                let sincArg = 2.0 * cutoff * x
+                let sincVal: Double
+                if abs(sincArg) < 1e-9 {
+                    sincVal = 2.0 * cutoff
+                } else {
+                    sincVal = sin(.pi * sincArg) / (.pi * x)
+                }
+                let u = x / halfDouble
+                let window: Double
+                if abs(u) >= 1.0 {
+                    window = 0.0
+                } else {
+                    let c1 = cos(.pi * (u + 1.0))
+                    let c2 = cos(2.0 * .pi * (u + 1.0))
+                    window = 0.42 - 0.5 * c1 + 0.08 * c2
+                }
+                let coeff = sincVal * window
+                table[rowOffset + k] = Float(coeff)
+                sum += coeff
+            }
+            if abs(sum) > 1e-9 {
+                let inv = Float(1.0 / sum)
+                for k in 0..<taps {
+                    table[rowOffset + k] *= inv
+                }
+            }
+        }
+
+        self.configuredInputRate = inputSampleRate
+        self.halfTaps = half
+        self.tapsPerPhase = taps
+        self.polyphaseTable = table
+        self.resampleBuffer = [Float](repeating: 0, count: half)
+        self.resamplePos = Double(half)
     }
 
     public static func measureLevels(_ samples: [Float]) -> AudioLevelMetrics {
@@ -63,43 +122,54 @@ public final class AudioPreprocessor {
         guard !input.isEmpty, inputSampleRate > 0 else { return [] }
         let targetRate: Double = 16_000.0
         if abs(inputSampleRate - targetRate) < 1.0 {
-            previousSample = input.last ?? 0
-            hasPreviousSample = true
             return input
         }
 
-        let ratio = inputSampleRate / targetRate
-        var extended: [Float]
-        if hasPreviousSample {
-            extended = [previousSample]
-            extended.append(contentsOf: input)
-        } else {
-            extended = [input[0]]
-            extended.append(contentsOf: input)
-            fractionalPosition = 1.0
+        if abs(configuredInputRate - inputSampleRate) >= 1.0 || polyphaseTable.isEmpty {
+            configureResampler(inputSampleRate: inputSampleRate)
         }
+
+        resampleBuffer.append(contentsOf: input)
+        let ratio = inputSampleRate / targetRate
+        let half = halfTaps
+        let taps = tapsPerPhase
+        let phases = Self.polyphasePhases
+        let limit = Double(resampleBuffer.count - half)
+        guard resamplePos < limit else { return [] }
 
         var output: [Float] = []
-        let estimatedCount = max(1, Int(Double(input.count) / ratio) + 2)
-        output.reserveCapacity(estimatedCount)
+        output.reserveCapacity(max(1, Int((limit - resamplePos) / ratio) + 2))
 
-        let maxIndex = Double(extended.count - 1)
-        var pos = fractionalPosition
-        while pos < maxIndex {
-            let idx = Int(pos)
-            let frac = Float(pos - Double(idx))
-            let s0 = extended[idx]
-            let s1 = extended[idx + 1]
-            output.append(s0 + (s1 - s0) * frac)
-            pos += ratio
+        var pos = resamplePos
+        resampleBuffer.withUnsafeBufferPointer { srcBuf in
+            polyphaseTable.withUnsafeBufferPointer { tblBuf in
+                guard let srcBase = srcBuf.baseAddress, let tblBase = tblBuf.baseAddress else { return }
+                while pos < limit {
+                    let center = Int(pos)
+                    let frac = pos - Double(center)
+                    let phaseIdx = min(phases - 1, Int(frac * Double(phases)))
+                    let startIdx = center - half + 1
+                    var dot: Float = 0
+                    vDSP_dotpr(
+                        srcBase.advanced(by: startIdx),
+                        1,
+                        tblBase.advanced(by: phaseIdx * taps),
+                        1,
+                        &dot,
+                        vDSP_Length(taps)
+                    )
+                    output.append(dot)
+                    pos += ratio
+                }
+            }
         }
 
-        fractionalPosition = pos - Double(input.count)
-        if fractionalPosition < 0 {
-            fractionalPosition = 0
+        let keepFrom = max(0, Int(pos) - half)
+        if keepFrom > 0 {
+            resampleBuffer.removeFirst(keepFrom)
+            pos -= Double(keepFrom)
         }
-        previousSample = input.last ?? 0
-        hasPreviousSample = true
+        resamplePos = pos
         return output
     }
 

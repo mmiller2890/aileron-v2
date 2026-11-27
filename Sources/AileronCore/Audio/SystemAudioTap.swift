@@ -8,6 +8,7 @@ public enum SystemAudioTapError: LocalizedError {
     case processTapCreationFailed(OSStatus)
     case tapUIDReadFailed(OSStatus)
     case tapFormatReadFailed(OSStatus)
+    case unsupportedAudioFormat(UInt32)
     case aggregateDeviceCreationFailed(OSStatus)
     case ioProcCreationFailed(OSStatus)
     case deviceStartFailed(OSStatus)
@@ -22,6 +23,8 @@ public enum SystemAudioTapError: LocalizedError {
             return "Failed to read CoreAudio tap UID (OSStatus \(status))."
         case .tapFormatReadFailed(let status):
             return "Failed to read CoreAudio tap stream format (OSStatus \(status))."
+        case .unsupportedAudioFormat(let flags):
+            return "Unsupported CoreAudio tap PCM format (flags 0x\(String(flags, radix: 16)))."
         case .aggregateDeviceCreationFailed(let status):
             return "Failed to create CoreAudio aggregate capture device (OSStatus \(status))."
         case .ioProcCreationFailed(let status):
@@ -103,6 +106,10 @@ public final class SystemAudioTap: @unchecked Sendable {
         guard fmtStatus == noErr, asbd.mSampleRate > 0 else {
             AudioHardwareDestroyProcessTap(createdTapID)
             throw SystemAudioTapError.tapFormatReadFailed(fmtStatus)
+        }
+        guard (asbd.mFormatFlags & kAudioFormatFlagIsFloat) != 0 else {
+            AudioHardwareDestroyProcessTap(createdTapID)
+            throw SystemAudioTapError.unsupportedAudioFormat(asbd.mFormatFlags)
         }
 
         let initialRate = asbd.mSampleRate

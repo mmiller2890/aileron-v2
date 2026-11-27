@@ -1,0 +1,6 @@
+module CSileroVad {
+    header "silero_vad.h"
+    header "silero_vad_weights.h"
+    header "spsc_atomics.h"
+    export *
+}

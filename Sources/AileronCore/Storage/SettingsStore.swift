@@ -20,24 +20,33 @@ public enum SettingsStore {
         return dir
     }
 
-    private static var settingsURL: URL {
+    public static var defaultSettingsURL: URL {
         appSupportDirectory().appendingPathComponent("settings.json")
     }
 
-    public static func load() -> AppSettings {
-        guard let data = try? Data(contentsOf: settingsURL),
-              let decoded = try? JSONDecoder().decode(AppSettings.self, from: data) else {
+    public static func load(from url: URL? = nil) -> AppSettings {
+        let target = url ?? defaultSettingsURL
+        guard FileManager.default.fileExists(atPath: target.path) else {
             return AppSettings()
         }
-        return decoded
+        do {
+            let data = try Data(contentsOf: target)
+            return try JSONDecoder().decode(AppSettings.self, from: data)
+        } catch {
+            DiagnosticsLog.shared.record(
+                category: "storage",
+                message: "Settings load failed; falling back to defaults"
+            )
+            return AppSettings()
+        }
     }
 
-    public static func save(_ settings: AppSettings) {
+    public static func save(_ settings: AppSettings, to url: URL? = nil) throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(settings) else { return }
-        let url = settingsURL
-        try? data.write(to: url, options: .atomic)
-        enforcePrivatePermissions(at: url, isDirectory: false)
+        let data = try encoder.encode(settings)
+        let target = url ?? defaultSettingsURL
+        try data.write(to: target, options: .atomic)
+        enforcePrivatePermissions(at: target, isDirectory: false)
     }
 }

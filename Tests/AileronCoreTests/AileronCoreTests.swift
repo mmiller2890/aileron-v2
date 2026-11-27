@@ -127,7 +127,7 @@ final class AileronCoreTests: XCTestCase {
         let prep = AudioPreprocessor(targetRMS: 0.14, maxGain: 4.0, noiseGateThreshold: 0.01)
         let silent = [Float](repeating: 0.001, count: 4800)
         let resampledSilent = prep.resampleTo16k(silent, inputSampleRate: 48_000)
-        XCTAssertEqual(resampledSilent.count, 1600, accuracy: 2)
+        XCTAssertTrue((1592...1602).contains(resampledSilent.count))
 
         let (gated, _) = prep.process(resampledSilent)
         XCTAssertTrue(gated.allSatisfy { $0 == 0 })
@@ -676,5 +676,168 @@ final class AileronCoreTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(10))
         }
         XCTAssertEqual(secrets.readCount, 1)
+    }
+
+    func testRingBufferConcurrentSPSCStressAndNonInterleavedDownmix() {
+        let rb = AudioRingBuffer(capacity: 4096)
+        var left: [Float] = [0.2, 0.8, -0.4, 1.0]
+        var right: [Float] = [0.6, 0.2, 0.4, 0.0]
+        left.withUnsafeMutableBufferPointer { lBuf in
+            right.withUnsafeMutableBufferPointer { rBuf in
+                var ptrs = [lBuf.baseAddress!, rBuf.baseAddress!]
+                ptrs.withUnsafeBufferPointer { arr in
+                    rb.writeNonInterleavedMonoDownmix(channels: arr.baseAddress!, channelCount: 2, frameLength: 4)
+                }
+            }
+        }
+        var downmixed: [Float] = []
+        _ = rb.drain(into: &downmixed)
+        XCTAssertEqual(downmixed.count, 4)
+        XCTAssertEqual(downmixed[0], 0.4, accuracy: 1e-5)
+        XCTAssertEqual(downmixed[1], 0.5, accuracy: 1e-5)
+        XCTAssertEqual(downmixed[2], 0.0, accuracy: 1e-5)
+        XCTAssertEqual(downmixed[3], 0.5, accuracy: 1e-5)
+
+        let stressRing = AudioRingBuffer(capacity: 8192)
+        let totalSamples = 120_000
+        let producerDone = DispatchSemaphore(value: 0)
+        let producerQueue = DispatchQueue(label: "test.spsc.producer")
+        producerQueue.async {
+            var cursor = 0
+            while cursor < totalSamples {
+                let n = min(256, totalSamples - cursor)
+                let block = (0..<n).map { Float(cursor + $0) }
+                block.withUnsafeBufferPointer { stressRing.write($0) }
+                cursor += n
+                if cursor % 2048 == 0 {
+                    Thread.sleep(forTimeInterval: 0.0002)
+                }
+            }
+            producerDone.signal()
+        }
+
+        var received = 0
+        var dropped: UInt64 = 0
+        var lastVal: Float = -1
+        var scratch: [Float] = []
+        while producerDone.wait(timeout: .now()) == .timedOut {
+            dropped &+= stressRing.drain(into: &scratch)
+            for v in scratch {
+                XCTAssertGreaterThan(v, lastVal)
+                lastVal = v
+            }
+            received += scratch.count
+        }
+        dropped &+= stressRing.drain(into: &scratch)
+        for v in scratch {
+            XCTAssertGreaterThan(v, lastVal)
+            lastVal = v
+        }
+        received += scratch.count
+        XCTAssertEqual(UInt64(received) + dropped, UInt64(totalSamples))
+        XCTAssertGreaterThan(received, 0)
+    }
+
+    func testPolyphaseResamplerAntiAliasingAndStreamingContinuity() {
+        let highFreqPrep = AudioPreprocessor()
+        let sampleCount = 48_000
+        let tone12k = (0..<sampleCount).map { i in
+            Float(sin(2.0 * .pi * 12_000.0 * Double(i) / 48_000.0))
+        }
+        var out12k: [Float] = []
+        for start in stride(from: 0, to: sampleCount, by: 1200) {
+            let chunk = Array(tone12k[start..<min(start + 1200, sampleCount)])
+            out12k.append(contentsOf: highFreqPrep.resampleTo16k(chunk, inputSampleRate: 48_000))
+        }
+        let steady12k = Array(out12k.dropFirst(100))
+        XCTAssertLessThan(AudioPreprocessor.measureLevels(steady12k).rms, 0.02)
+
+        let speechTonePrep = AudioPreprocessor()
+        let tone1k = (0..<sampleCount).map { i in
+            Float(sin(2.0 * .pi * 1_000.0 * Double(i) / 48_000.0))
+        }
+        var out1k: [Float] = []
+        for start in stride(from: 0, to: sampleCount, by: 1200) {
+            let chunk = Array(tone1k[start..<min(start + 1200, sampleCount)])
+            out1k.append(contentsOf: speechTonePrep.resampleTo16k(chunk, inputSampleRate: 48_000))
+        }
+        let steady1k = Array(out1k.dropFirst(100))
+        XCTAssertEqual(AudioPreprocessor.measureLevels(steady1k).rms, 0.707, accuracy: 0.05)
+        XCTAssertTrue((15_990...16_005).contains(out1k.count))
+    }
+
+    func testIncrementalDatabaseWritesAndSchemaVersion() async throws {
+        let store = try DatabaseStore(path: ":memory:")
+        let version = try await store.schemaVersion()
+        XCTAssertEqual(version, DatabaseStore.currentSchemaVersion)
+
+        var session = SessionRecord(title: "Incremental Session")
+        let t1 = TranscriptTurn(sequence: 1, text: "Explain Raft leader election.", speaker: "Speaker 1", isQuestion: true)
+        session.turns.append(t1)
+        try await store.appendTurn(t1, in: session)
+
+        let ex1 = AIExchange(
+            prompt: t1.text,
+            response: "Nodes time out, become candidates, increment term, and request majority votes.",
+            providerName: "Ollama (Local)",
+            modelName: "llama3.2"
+        )
+        session.exchanges.append(ex1)
+        try await store.upsertExchange(ex1, in: session)
+
+        session.summary = "Covered Raft consensus and split-vote prevention."
+        try await store.upsertSessionMetadata(session)
+
+        let loaded = try await store.loadSession(id: session.id)
+        XCTAssertEqual(loaded?.turns.count, 1)
+        XCTAssertEqual(loaded?.exchanges.count, 1)
+        XCTAssertEqual(loaded?.summary, "Covered Raft consensus and split-vote prevention.")
+
+        let searchHits = try await store.listSessions(searchQuery: "consensus")
+        XCTAssertEqual(searchHits.count, 1)
+        XCTAssertEqual(searchHits[0].id, session.id)
+    }
+
+    func testSettingsStoreCorruptionRecoveryAndSaveFailure() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("aileron-settings-test-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let corruptURL = tempDir.appendingPathComponent("corrupt.json")
+        try Data("{not valid json".utf8).write(to: corruptURL)
+        let recovered = SettingsStore.load(from: corruptURL)
+        XCTAssertEqual(recovered.activeProvider, .ollama)
+        XCTAssertEqual(recovered.streamingLatency, .ms320)
+
+        let validURL = tempDir.appendingPathComponent("valid.json")
+        var custom = AppSettings()
+        custom.autoAnswerQuestions = false
+        try SettingsStore.save(custom, to: validURL)
+        let reloaded = SettingsStore.load(from: validURL)
+        XCTAssertEqual(reloaded.autoAnswerQuestions, false)
+
+        let missingParent = tempDir.appendingPathComponent("nonexistent/sub/settings.json")
+        XCTAssertThrowsError(try SettingsStore.save(custom, to: missingParent))
+    }
+
+    func testAIClientMalformedStreamLinesReturnNilSafely() {
+        let malformed = [
+            "",
+            "   ",
+            "data:",
+            "data: {truncated",
+            "data: [DONE]",
+            "event: ping",
+            "{not-json",
+            #"data: {"choices":[]}"#,
+            #"data: {"type":"content_block_delta","delta":{}}"#,
+            #"data: {"candidates":[{"content":{}}]}"#
+        ]
+        for line in malformed {
+            for provider in AIProviderKind.allCases {
+                XCTAssertNil(AIClient.parseStreamLine(line, provider: provider))
+            }
+        }
     }
 }

@@ -30,6 +30,8 @@ private final class SQLiteConnection: @unchecked Sendable {
 }
 
 public actor DatabaseStore {
+    public static let currentSchemaVersion: Int32 = 1
+
     private let connection: SQLiteConnection
     private var db: OpaquePointer? { connection.raw }
 
@@ -133,6 +135,26 @@ public actor DatabaseStore {
         for sql in statements {
             try execRaw(db: db, sql: sql)
         }
+
+        let existingVersion = try readUserVersion(db: db)
+        if existingVersion < currentSchemaVersion {
+            try execRaw(db: db, sql: "PRAGMA user_version = \(currentSchemaVersion);")
+        }
+    }
+
+    private static func readUserVersion(db: OpaquePointer) throws -> Int32 {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "PRAGMA user_version;", -1, &stmt, nil) == SQLITE_OK, let valid = stmt else {
+            throw DatabaseError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+        defer { sqlite3_finalize(valid) }
+        guard sqlite3_step(valid) == SQLITE_ROW else { return 0 }
+        return sqlite3_column_int(valid, 0)
+    }
+
+    public func schemaVersion() throws -> Int32 {
+        guard let db else { throw DatabaseError.openFailed("Database closed") }
+        return try Self.readUserVersion(db: db)
     }
 
     private static func execRaw(db: OpaquePointer, sql: String) throws {
@@ -251,24 +273,123 @@ public actor DatabaseStore {
                 try stepDone(upsertExchange)
             }
 
-            let deleteFts = try prepare("DELETE FROM sessions_fts WHERE session_id = ?;")
-            defer { sqlite3_finalize(deleteFts) }
-            bindText(deleteFts, 1, session.id.uuidString)
-            try stepDone(deleteFts)
-
-            let combinedContent = (
-                session.turns.map(\.text) +
-                session.exchanges.flatMap { [$0.prompt, $0.response] }
-            ).joined(separator: "\n")
-
-            let insertFts = try prepare("INSERT INTO sessions_fts (session_id, title, summary, content) VALUES (?, ?, ?, ?);")
-            defer { sqlite3_finalize(insertFts) }
-            bindText(insertFts, 1, session.id.uuidString)
-            bindText(insertFts, 2, session.title)
-            bindText(insertFts, 3, session.summary ?? "")
-            bindText(insertFts, 4, combinedContent)
-            try stepDone(insertFts)
+            try updateSessionFtsLocked(session)
         }
+    }
+
+    public func upsertSessionMetadata(_ session: SessionRecord) throws {
+        try inTransaction {
+            try upsertSessionRowLocked(session)
+            try updateSessionFtsLocked(session)
+        }
+    }
+
+    public func appendTurn(_ turn: TranscriptTurn, in session: SessionRecord) throws {
+        try inTransaction {
+            try upsertSessionRowLocked(session)
+            let stmt = try prepare("""
+                INSERT INTO turns (id, session_id, sequence, text, speaker, is_question, confidence, duration_seconds, timestamp, source)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    sequence = excluded.sequence,
+                    text = excluded.text,
+                    speaker = excluded.speaker,
+                    is_question = excluded.is_question,
+                    confidence = excluded.confidence,
+                    duration_seconds = excluded.duration_seconds;
+            """)
+            defer { sqlite3_finalize(stmt) }
+            bindText(stmt, 1, turn.id.uuidString)
+            bindText(stmt, 2, session.id.uuidString)
+            sqlite3_bind_int(stmt, 3, Int32(turn.sequence))
+            bindText(stmt, 4, turn.text)
+            bindOptionalText(stmt, 5, turn.speaker)
+            sqlite3_bind_int(stmt, 6, turn.isQuestion ? 1 : 0)
+            sqlite3_bind_double(stmt, 7, Double(turn.confidence))
+            sqlite3_bind_double(stmt, 8, turn.durationSeconds)
+            sqlite3_bind_double(stmt, 9, turn.timestamp.timeIntervalSince1970)
+            bindText(stmt, 10, turn.source.rawValue)
+            try stepDone(stmt)
+            try updateSessionFtsLocked(session)
+        }
+    }
+
+    public func upsertExchange(_ exchange: AIExchange, in session: SessionRecord) throws {
+        try inTransaction {
+            try upsertSessionRowLocked(session)
+            let stmt = try prepare("""
+                INSERT INTO exchanges (id, session_id, prompt, response, provider_name, model_name, has_screenshot, triggered_automatically, latency_ms, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    prompt = excluded.prompt,
+                    response = excluded.response,
+                    provider_name = excluded.provider_name,
+                    model_name = excluded.model_name,
+                    has_screenshot = excluded.has_screenshot,
+                    latency_ms = excluded.latency_ms;
+            """)
+            defer { sqlite3_finalize(stmt) }
+            bindText(stmt, 1, exchange.id.uuidString)
+            bindText(stmt, 2, session.id.uuidString)
+            bindText(stmt, 3, exchange.prompt)
+            bindText(stmt, 4, exchange.response)
+            bindText(stmt, 5, exchange.providerName)
+            bindText(stmt, 6, exchange.modelName)
+            sqlite3_bind_int(stmt, 7, exchange.hasScreenshot ? 1 : 0)
+            sqlite3_bind_int(stmt, 8, exchange.triggeredAutomatically ? 1 : 0)
+            if let latency = exchange.latencyMs {
+                sqlite3_bind_int(stmt, 9, Int32(latency))
+            } else {
+                sqlite3_bind_null(stmt, 9)
+            }
+            sqlite3_bind_double(stmt, 10, exchange.timestamp.timeIntervalSince1970)
+            try stepDone(stmt)
+            try updateSessionFtsLocked(session)
+        }
+    }
+
+    private func upsertSessionRowLocked(_ session: SessionRecord) throws {
+        let aliasesData = (try? JSONEncoder().encode(session.speakerAliases)) ?? Data("{}".utf8)
+        let aliasesJson = String(data: aliasesData, encoding: .utf8) ?? "{}"
+        let stmt = try prepare("""
+            INSERT INTO sessions (id, title, created_at, updated_at, profile_id, summary, speaker_aliases_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                title = excluded.title,
+                updated_at = excluded.updated_at,
+                profile_id = excluded.profile_id,
+                summary = excluded.summary,
+                speaker_aliases_json = excluded.speaker_aliases_json;
+        """)
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, 1, session.id.uuidString)
+        bindText(stmt, 2, session.title)
+        sqlite3_bind_double(stmt, 3, session.createdAt.timeIntervalSince1970)
+        sqlite3_bind_double(stmt, 4, session.updatedAt.timeIntervalSince1970)
+        bindOptionalText(stmt, 5, session.profileId?.uuidString)
+        bindOptionalText(stmt, 6, session.summary)
+        bindText(stmt, 7, aliasesJson)
+        try stepDone(stmt)
+    }
+
+    private func updateSessionFtsLocked(_ session: SessionRecord) throws {
+        let deleteFts = try prepare("DELETE FROM sessions_fts WHERE session_id = ?;")
+        defer { sqlite3_finalize(deleteFts) }
+        bindText(deleteFts, 1, session.id.uuidString)
+        try stepDone(deleteFts)
+
+        let combinedContent = (
+            session.turns.map(\.text) +
+            session.exchanges.flatMap { [$0.prompt, $0.response] }
+        ).joined(separator: "\n")
+
+        let insertFts = try prepare("INSERT INTO sessions_fts (session_id, title, summary, content) VALUES (?, ?, ?, ?);")
+        defer { sqlite3_finalize(insertFts) }
+        bindText(insertFts, 1, session.id.uuidString)
+        bindText(insertFts, 2, session.title)
+        bindText(insertFts, 3, session.summary ?? "")
+        bindText(insertFts, 4, combinedContent)
+        try stepDone(insertFts)
     }
 
     public func loadSession(id: UUID) throws -> SessionRecord? {

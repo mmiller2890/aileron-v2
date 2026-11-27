@@ -86,20 +86,11 @@ public final class MicCapture: @unchecked Sendable {
             guard let channelData = buffer.floatChannelData else { return }
             let frameLength = Int(buffer.frameLength)
             guard frameLength > 0 else { return }
-            if channels == 1 {
-                let ptr = UnsafeBufferPointer(start: channelData[0], count: frameLength)
-                capturedRing.write(ptr)
-            } else {
-                var mono = [Float](repeating: 0, count: frameLength)
-                let scale = 1.0 / Float(channels)
-                for ch in 0..<channels {
-                    let src = channelData[ch]
-                    for i in 0..<frameLength {
-                        mono[i] += src[i] * scale
-                    }
-                }
-                mono.withUnsafeBufferPointer { capturedRing.write($0) }
-            }
+            capturedRing.writeNonInterleavedMonoDownmix(
+                channels: channelData,
+                channelCount: channels,
+                frameLength: frameLength
+            )
         }
 
         engine.prepare()
