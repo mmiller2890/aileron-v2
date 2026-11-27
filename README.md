@@ -35,9 +35,10 @@ An *aileron* keeps an aircraft level and responsive in real time without getting
 
 ## Key Capabilities
 
-### Real-Time Streaming on Both Sides of the Call
-- **System Audio (`⌘⇧A`):** CoreAudio Process Tap captures the far end directly, tracks default-output switches automatically (plug in AirPods mid-call without dropping a beat), filters out listening noises (`"Yeah."`, `"Mm-hmm."`), detects real questions, and streams answers in your own voice.
-- **Live Streaming Microphone (`⌘⇧M`):** Words stream into the bar as you speak — click **Send** when finished to polish with Parakeet TDT v3 and ask immediately, or **Cancel** to discard.
+### Real-Time `Listen → Transcribe → AI Answer` Pipeline
+- **System Audio (`⌘⇧A`):** CoreAudio Process Tap captures the far end directly, tracks default-output switches automatically (plug in AirPods mid-call without dropping a beat), auto-opens the live transcript drawer, lights up the **`Listen → Transcribe → AI Answer`** status strip, filters out backchannels (`"Yeah."`, `"Mm-hmm."`) and false-positive imperatives, tags detected questions, and queues follow-ups so rapid speech never cuts off an in-flight AI stream.
+- **Direct First-Person Coaching:** Captured speech is framed to extract and answer the core question directly in your own voice—suppressing passive filler replies—while manual asks always interrupt immediately when you want to steer the model yourself.
+- **Live Streaming Microphone (`⌘⇧M`) & Input Picker:** Words stream into the bar as you speak—click **Send** when finished to polish with Parakeet TDT v3 and ask immediately, or **Cancel** to discard. Pick any specific Mac microphone, headset, or USB audio interface in **Settings → Audio → Microphone Input** with direct CoreAudio device routing.
 - **Live Speaker Aliasing:** Click any speaker tag (`Speaker 1`) in the transcript drawer to rename them (`Interviewer`, `Sarah`) across the session and Markdown export.
 
 ### Floating Bar ↔ Main Studio Flow
@@ -90,9 +91,9 @@ open build/Aileron.app
 
 > **Tip:** Use `./scripts/bundle-app.sh debug` for quick incremental builds during development, or install permanently with `cp -R build/Aileron.app /Applications/Aileron.app`.
 
-### First-Run Permissions
+### First-Run Setup & Permissions
 
-Aileron only asks for permissions when you trigger the feature that needs them:
+On first launch, Aileron opens a guided **Setup & Permissions** sheet (re-openable anytime from **Settings**) with live permission status indicators and one-click deep links to macOS System Settings:
 
 | Feature | macOS Permission | Where to Enable |
 |---|---|---|
@@ -100,7 +101,13 @@ Aileron only asks for permissions when you trigger the feature that needs them:
 | Voice Ask (`⌘⇧M`) | **Microphone** | System Settings → Privacy & Security → Microphone |
 | Screen Q&A (`⌘⇧S`) | **Screen Recording** | System Settings → Privacy & Security → Screen & System Audio Recording |
 
-*Global shortcuts use native Carbon hotkeys — no Accessibility permission required.*
+If a permission is missing or revoked mid-session, Aileron surfaces an actionable banner with a direct **Open Settings** button.
+
+*Global shortcuts use native Carbon hotkeys — no Accessibility permission required. If another app already claims a shortcut, **Settings → Keyboard Shortcuts** flags the conflict and lets you re-register without restarting.*
+
+### Privacy-Safe Diagnostics
+
+Need to troubleshoot audio routing, model loading, or shortcut registration? Open **Settings → Permissions & Diagnostics** to copy or export a **Diagnostic Report** containing app version, macOS build, audio devices, hotkey status, and timestamped engine events — **strictly excluding transcripts, prompts, AI replies, and API keys**.
 
 ### Connect Your AI Provider
 
@@ -120,7 +127,7 @@ Open **Models → AI Model**, select **Ollama (Local)**, and click **Refresh** t
 
 ## Streaming Latency Guide
 
-Configure live caption responsiveness in **Settings → Audio & Capture → Streaming Chunk Latency**:
+Configure live caption responsiveness in **Settings → Audio → Streaming Chunk Latency**:
 
 | Chunk Latency | Step Size (16 kHz) | Accuracy (LibriSpeech) | Best For |
 |---|---|---|---|
@@ -157,24 +164,25 @@ Configure live caption responsiveness in **Settings → Audio & Capture → Stre
 aileron-v2/
 ├── Sources/
 │   ├── AileronCore/
-│   │   ├── Audio/      # CoreAudio Process Tap, MicCapture, AudioRingBuffer, Preprocessor, VAD Segmenter
-│   │   ├── Speech/     # Direct FluidAudio SpeechEngine (Parakeet v3, EOU Streaming, Sortformer) & Heuristics
-│   │   ├── AI/         # Typed URLSession.bytes SSE/NDJSON AIClient & PromptComposer
+│   │   ├── Audio/      # CoreAudio Process Tap, MicCapture, AudioDeviceManager, RingBuffer, Preprocessor, VAD Segmenter
+│   │   ├── Speech/     # Direct FluidAudio SpeechEngine (Parakeet v3, EOU Streaming, Sortformer) & QuestionGate/Heuristics
+│   │   ├── AI/         # Typed URLSession.bytes SSE/NDJSON AIClient & direct-answer PromptComposer
 │   │   ├── Capture/    # Native ScreenCaptureKit display capture
 │   │   ├── Storage/    # macOS KeychainStore, WAL SQLite3 + FTS5 DatabaseStore, SettingsStore
+│   │   ├── System/     # Live PermissionsService & privacy-safe DiagnosticsLog
 │   │   ├── Models/     # Domain, Settings, and Slack-compatible Theme models
-│   │   └── Engine/     # @MainActor @Observable AileronEngine (single source of truth)
+│   │   └── Engine/     # @MainActor @Observable AileronEngine (queued auto-answers & live pipeline state)
 │   └── AileronApp/
 │       ├── Theme/      # Dynamic ResolvedTheme, Art Deco Emblem & Wordmark, SwiftUI controls
-│       ├── Windows/    # Non-activating Stealth NSPanel, Dashboard NSWindow, Carbon HotKeyManager
-│       └── Views/      # HUD, Live Studio, Sessions, Prep Profiles, Models, Appearance & Settings
+│       ├── Windows/    # Non-activating Stealth NSPanel, Dashboard NSWindow, conflict-aware Carbon HotKeyManager
+│       └── Views/      # HUD, Live Studio, Onboarding, Sessions, Prep Profiles, Models, Appearance & Settings
 ├── Tests/
 │   └── AileronCoreTests/
 ├── assets/             # Graphic-print Art Deco SVG banner, emblem, dividers & theme swatches
 └── scripts/            # AppIcon.icns generator & Aileron.app bundler
 ```
 
-Run the core unit test suite:
+Run the core unit test suite (`12` tests covering audio buffering, speech heuristics, prompt framing, themes, and SQLite FTS5):
 
 ```bash
 swift test
