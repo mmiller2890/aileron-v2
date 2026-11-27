@@ -24,13 +24,43 @@ public enum SpeechEngineError: LocalizedError {
     }
 }
 
+private actor VadSession {
+    private var vadManager: VadManager?
+    private var vadStreamState: VadStreamState?
+
+    var isReady: Bool { vadManager != nil }
+
+    func initialize(threshold: Float) async throws {
+        if vadManager != nil { return }
+        let config = VadConfig(defaultThreshold: threshold)
+        let manager = try await VadManager(config: config)
+        self.vadManager = manager
+        self.vadStreamState = await manager.makeStreamState()
+    }
+
+    func probability(samples4096: [Float]) async -> Float? {
+        guard let manager = vadManager, let state = vadStreamState else { return nil }
+        do {
+            let result = try await manager.processStreamingChunk(samples4096, state: state)
+            self.vadStreamState = result.state
+            return result.probability
+        } catch {
+            return nil
+        }
+    }
+
+    func reset() async {
+        guard let manager = vadManager else { return }
+        vadStreamState = await manager.makeStreamState()
+    }
+}
+
 public actor SpeechEngine {
     private static let liveTurnFlushSamples = 16_640
 
+    private let vadSession = VadSession()
     private var asrManager: AsrManager?
     private var asrModels: AsrModels?
-    private var vadManager: VadManager?
-    private var vadStreamState: VadStreamState?
     private var streamingAsrManager: StreamingEouAsrManager?
     private var micStreamingAsrManager: StreamingEouAsrManager?
     private var loadedStreamingLatency: StreamingLatencyPreset?
@@ -41,7 +71,9 @@ public actor SpeechEngine {
     public init() {}
 
     public var isAsrReady: Bool { asrManager != nil }
-    public var isVadReady: Bool { vadManager != nil }
+    public var isVadReady: Bool {
+        get async { await vadSession.isReady }
+    }
     public var isLiveTextReady: Bool { streamingAsrManager != nil }
     public var isMicLiveTextReady: Bool { micStreamingAsrManager != nil }
     public var isLiveSpeakersReady: Bool { liveDiarizer != nil }
@@ -82,12 +114,8 @@ public actor SpeechEngine {
         onProgress?(.ready, 1.0, nil)
     }
 
-    public func initializeVad(threshold: Float = 0.5) async throws {
-        if vadManager != nil { return }
-        let config = VadConfig(defaultThreshold: threshold)
-        let manager = try await VadManager(config: config)
-        self.vadManager = manager
-        self.vadStreamState = await manager.makeStreamState()
+    public nonisolated func initializeVad(threshold: Float = 0.5) async throws {
+        try await vadSession.initialize(threshold: threshold)
     }
 
     public func initializeLiveText(
@@ -193,20 +221,12 @@ public actor SpeechEngine {
         )
     }
 
-    public func vadProbability(samples4096: [Float]) async -> Float? {
-        guard let manager = vadManager, let state = vadStreamState else { return nil }
-        do {
-            let result = try await manager.processStreamingChunk(samples4096, state: state)
-            self.vadStreamState = result.state
-            return result.probability
-        } catch {
-            return nil
-        }
+    public nonisolated func vadProbability(samples4096: [Float]) async -> Float? {
+        await vadSession.probability(samples4096: samples4096)
     }
 
-    public func resetVad() async {
-        guard let manager = vadManager else { return }
-        vadStreamState = await manager.makeStreamState()
+    public nonisolated func resetVad() async {
+        await vadSession.reset()
     }
 
     public func feedLiveText(samples16k: [Float]) async throws -> String {

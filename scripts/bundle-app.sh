@@ -94,11 +94,19 @@ cat > "$CONTENTS_DIR/Info.plist" <<'PLIST'
 PLIST
 
 ENTITLEMENTS="$ROOT_DIR/entitlements/Aileron.entitlements"
-SIGN_IDENTITY="${AILERON_SIGN_IDENTITY:--}"
-SIGN_ARGS=(--force --options runtime --entitlements "$ENTITLEMENTS" --sign "$SIGN_IDENTITY")
-if [ "$SIGN_IDENTITY" != "-" ]; then
-  SIGN_ARGS+=(--timestamp)
+if [ -n "${AILERON_SIGN_IDENTITY:-}" ]; then
+  SIGN_IDENTITY="$AILERON_SIGN_IDENTITY"
+elif security find-identity -v -p codesigning 2>/dev/null | grep -q '"Aileron Signing"'; then
+  SIGN_IDENTITY="Aileron Signing"
+else
+  SIGN_IDENTITY="-"
 fi
+SIGN_ARGS=(--force --options runtime --entitlements "$ENTITLEMENTS" --sign "$SIGN_IDENTITY")
+case "$SIGN_IDENTITY" in
+  "Developer ID"*)
+    SIGN_ARGS+=(--timestamp)
+    ;;
+esac
 
 for nested in "$RESOURCES_DIR"/*.bundle; do
   if [ -d "$nested/Contents/MacOS" ]; then

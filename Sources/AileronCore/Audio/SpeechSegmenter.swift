@@ -10,7 +10,8 @@ public enum SpeechSegmentEvent: Sendable {
 
 public final class SpeechSegmenter {
     public static let sampleRate: Int = 16_000
-    public static let preSpeechSamples: Int = 7_680
+    public static let frameSamples: Int = 512
+    public static let preSpeechSamples: Int = 10_240
 
     public var settings: VADSettings
     private var nextTurnId: UInt64 = 1
@@ -19,6 +20,7 @@ public final class SpeechSegmenter {
     private var speechBuffer: [Float] = []
     private var silenceSampleCount: Int = 0
     private var activeSpeechSampleCount: Int = 0
+    private var noiseFloorRMS: Float = 0.001
 
     public var isInSpeech: Bool { activeTurnId != nil }
 
@@ -33,6 +35,7 @@ public final class SpeechSegmenter {
         speechBuffer.removeAll(keepingCapacity: true)
         silenceSampleCount = 0
         activeSpeechSampleCount = 0
+        noiseFloorRMS = 0.001
     }
 
     public func process(samples16k: [Float], neuralProbability: Float?) -> [SpeechSegmentEvent] {
@@ -43,13 +46,21 @@ public final class SpeechSegmenter {
         let sustainThreshold = startThreshold * 0.65
         let energy = AudioPreprocessor.measureLevels(samples16k).rms
         let energyStart = max(0.008, settings.noiseGateThreshold * 3.5)
-        let energySustain = energyStart * 0.6
+        let silenceFloor = max(settings.noiseGateThreshold * 2.0, noiseFloorRMS * 2.2)
+
+        if activeTurnId == nil && energy < energyStart {
+            noiseFloorRMS = noiseFloorRMS * 0.92 + energy * 0.08
+        }
 
         let isVoice: Bool
         if let prob = neuralProbability {
-            isVoice = activeTurnId == nil ? (prob >= startThreshold) : (prob >= sustainThreshold)
+            if activeTurnId == nil {
+                isVoice = prob >= startThreshold && energy >= silenceFloor
+            } else {
+                isVoice = prob >= sustainThreshold && energy >= silenceFloor
+            }
         } else {
-            isVoice = activeTurnId == nil ? (energy >= energyStart) : (energy >= energySustain)
+            isVoice = activeTurnId == nil ? (energy >= energyStart) : (energy >= silenceFloor)
         }
 
         if let currentId = activeTurnId {
@@ -64,14 +75,10 @@ public final class SpeechSegmenter {
             }
 
             let silenceThresholdSamples = max(1_600, (settings.silenceEndMs * Self.sampleRate) / 1000)
-            let shortPauseSamples = (320 * Self.sampleRate) / 1000
-            let softSplitSamples = 15 * Self.sampleRate
-            let hardSplitSamples = max(16 * Self.sampleRate, Int(settings.maxTurnSeconds * Double(Self.sampleRate)))
+            let hardSplitSamples = max(20 * Self.sampleRate, Int(settings.maxTurnSeconds * Double(Self.sampleRate)))
 
             if silenceSampleCount >= silenceThresholdSamples {
                 events.append(contentsOf: finishCurrentTurn(trimTrailingSilence: true))
-            } else if speechBuffer.count >= softSplitSamples && silenceSampleCount >= shortPauseSamples {
-                events.append(contentsOf: splitCurrentTurnAtBoundary(keepTail: false))
             } else if speechBuffer.count >= hardSplitSamples {
                 events.append(contentsOf: splitCurrentTurnAtQuietestHop())
             }
@@ -131,32 +138,10 @@ public final class SpeechSegmenter {
         return [.turnCompleted(turnId: turnId, samples: segment, durationSeconds: duration)]
     }
 
-    private func splitCurrentTurnAtBoundary(keepTail: Bool) -> [SpeechSegmentEvent] {
-        guard let turnId = activeTurnId else { return [] }
-        let segment = speechBuffer
-        let duration = Double(segment.count) / Double(Self.sampleRate)
-        speechBuffer.removeAll(keepingCapacity: true)
-        silenceSampleCount = 0
-        activeSpeechSampleCount = 0
-
-        if keepTail {
-            let newId = nextTurnId
-            nextTurnId += 1
-            activeTurnId = newId
-            return [
-                .turnCompleted(turnId: turnId, samples: segment, durationSeconds: duration),
-                .speechStarted(turnId: newId)
-            ]
-        } else {
-            activeTurnId = nil
-            return [.turnCompleted(turnId: turnId, samples: segment, durationSeconds: duration)]
-        }
-    }
-
     private func splitCurrentTurnAtQuietestHop() -> [SpeechSegmentEvent] {
         guard let turnId = activeTurnId else { return [] }
         let hopSize = 2_560
-        let searchWindow = min(speechBuffer.count / 2, 40_000)
+        let searchWindow = min(speechBuffer.count / 2, 48_000)
         let searchStart = max(0, speechBuffer.count - searchWindow)
 
         var bestSplitIndex = speechBuffer.count

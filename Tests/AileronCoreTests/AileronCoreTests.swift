@@ -1,5 +1,72 @@
+import os
 import XCTest
 @testable import AileronCore
+
+private final class CountingSecretStore: SecretStore, @unchecked Sendable {
+    private struct State {
+        var values: [String: String] = [:]
+        var readCount: Int = 0
+        var writeCount: Int = 0
+    }
+
+    private let lock = OSAllocatedUnfairLock(initialState: State())
+
+    init(initial: [String: String] = [:]) {
+        lock.withLock { $0.values = initial }
+    }
+
+    var readCount: Int { lock.withLock { $0.readCount } }
+    var writeCount: Int { lock.withLock { $0.writeCount } }
+
+    func setSecret(_ value: String, for account: String) throws {
+        lock.withLock { state in
+            state.writeCount += 1
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                state.values.removeValue(forKey: account)
+            } else {
+                state.values[account] = trimmed
+            }
+        }
+    }
+
+    func secret(for account: String) -> String? {
+        lock.withLock { state in
+            state.readCount += 1
+            return state.values[account]
+        }
+    }
+
+    func deleteSecret(for account: String) throws {
+        lock.withLock { $0.values.removeValue(forKey: account) }
+    }
+
+    func hasSecret(for account: String) -> Bool {
+        lock.withLock { $0.values[account] != nil }
+    }
+}
+
+private actor ControlledStreamHub {
+    private var continuations: [AsyncThrowingStream<String, Error>.Continuation] = []
+    private var prompts: [String] = []
+
+    func register(prompt: String, continuation: AsyncThrowingStream<String, Error>.Continuation) {
+        prompts.append(prompt)
+        continuations.append(continuation)
+    }
+
+    func count() -> Int { continuations.count }
+
+    func yield(_ chunk: String, at index: Int) {
+        guard continuations.indices.contains(index) else { return }
+        continuations[index].yield(chunk)
+    }
+
+    func finish(at index: Int) {
+        guard continuations.indices.contains(index) else { return }
+        continuations[index].finish()
+    }
+}
 
 final class AileronCoreTests: XCTestCase {
     func testRingBufferWriteDrainAndWrap() {
@@ -357,5 +424,239 @@ final class AileronCoreTests: XCTestCase {
         let dbAttrs = try FileManager.default.attributesOfItem(atPath: dbURL.path)
         let dbPerms = (dbAttrs[.posixPermissions] as? NSNumber)?.intValue
         XCTAssertEqual(dbPerms, 0o600)
+    }
+
+    func testSpeechSegmenter32msSilenceDetectionAndGapSeparation() {
+        let settings = VADSettings(sensitivity: 0.55, silenceEndMs: 750, minSpeechMs: 260, maxTurnSeconds: 35)
+        let segmenter = SpeechSegmenter(settings: settings)
+
+        let voiceFrame = [Float](repeating: 0.18, count: SpeechSegmenter.frameSamples)
+        let silentFrame = [Float](repeating: 0.0, count: SpeechSegmenter.frameSamples)
+
+        var completedCount = 0
+        for _ in 0..<20 {
+            let events = segmenter.process(samples16k: voiceFrame, neuralProbability: 0.90)
+            completedCount += events.filter { if case .turnCompleted = $0 { return true }; return false }.count
+        }
+        XCTAssertTrue(segmenter.isInSpeech)
+
+        for _ in 0..<28 {
+            let events = segmenter.process(samples16k: silentFrame, neuralProbability: 0.85)
+            completedCount += events.filter { if case .turnCompleted = $0 { return true }; return false }.count
+        }
+        XCTAssertEqual(completedCount, 1)
+        XCTAssertFalse(segmenter.isInSpeech)
+
+        for _ in 0..<20 {
+            let events = segmenter.process(samples16k: voiceFrame, neuralProbability: 0.90)
+            completedCount += events.filter { if case .turnCompleted = $0 { return true }; return false }.count
+        }
+        for _ in 0..<28 {
+            let events = segmenter.process(samples16k: silentFrame, neuralProbability: 0.85)
+            completedCount += events.filter { if case .turnCompleted = $0 { return true }; return false }.count
+        }
+        XCTAssertEqual(completedCount, 2)
+    }
+
+    func testSpeechSegmenterLongQuestionNotSplitAtShortPause() {
+        let settings = VADSettings(sensitivity: 0.55, silenceEndMs: 750, minSpeechMs: 260, maxTurnSeconds: 35)
+        let segmenter = SpeechSegmenter(settings: settings)
+
+        let voiceFrame = [Float](repeating: 0.18, count: SpeechSegmenter.frameSamples)
+        let silentFrame = [Float](repeating: 0.0, count: SpeechSegmenter.frameSamples)
+        var completed: [Double] = []
+
+        for _ in 0..<500 {
+            for e in segmenter.process(samples16k: voiceFrame, neuralProbability: 0.90) {
+                if case .turnCompleted(_, _, let dur) = e { completed.append(dur) }
+            }
+        }
+        for _ in 0..<11 {
+            for e in segmenter.process(samples16k: silentFrame, neuralProbability: 0.10) {
+                if case .turnCompleted(_, _, let dur) = e { completed.append(dur) }
+            }
+        }
+        XCTAssertTrue(completed.isEmpty)
+        XCTAssertTrue(segmenter.isInSpeech)
+
+        for _ in 0..<150 {
+            for e in segmenter.process(samples16k: voiceFrame, neuralProbability: 0.90) {
+                if case .turnCompleted(_, _, let dur) = e { completed.append(dur) }
+            }
+        }
+        for _ in 0..<28 {
+            for e in segmenter.process(samples16k: silentFrame, neuralProbability: 0.05) {
+                if case .turnCompleted(_, _, let dur) = e { completed.append(dur) }
+            }
+        }
+        XCTAssertEqual(completed.count, 1)
+        XCTAssertGreaterThan(completed[0], 20.0)
+    }
+
+    @MainActor
+    func testEngineCaptureToAnswerPipelineAndQueueing() async throws {
+        let hub = ControlledStreamHub()
+        let secrets = CountingSecretStore()
+        let engine = AileronEngine(
+            keychain: secrets,
+            databasePath: ":memory:",
+            initialSettings: AppSettings(),
+            aiStreamHandler: { _, _, _, _, messages in
+                let prompt = messages.last?.text ?? ""
+                return AsyncThrowingStream { continuation in
+                    Task {
+                        await hub.register(prompt: prompt, continuation: continuation)
+                    }
+                }
+            },
+            autoBootstrap: false
+        )
+
+        engine.commitTranscribedTurn(text: "Yeah, okay.")
+        XCTAssertTrue(engine.currentSession.turns.isEmpty)
+        XCTAssertTrue(engine.currentSession.exchanges.isEmpty)
+
+        engine.commitTranscribedTurn(text: "We deployed that patch last Tuesday.")
+        XCTAssertEqual(engine.currentSession.turns.count, 1)
+        XCTAssertTrue(engine.currentSession.exchanges.isEmpty)
+
+        engine.commitTranscribedTurn(text: "How do you troubleshoot DNS failover?")
+        for _ in 0..<40 where await hub.count() < 1 {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let startedCount = await hub.count()
+        XCTAssertEqual(startedCount, 1)
+        XCTAssertTrue(engine.isStreamingAI)
+
+        await hub.yield("First, verify resolver reachability. ", at: 0)
+        engine.commitTranscribedTurn(text: "Walk me through your Active Directory lockout investigation.")
+        try await Task.sleep(for: .milliseconds(30))
+
+        let whileStreamingCount = await hub.count()
+        XCTAssertEqual(whileStreamingCount, 1)
+        await hub.yield("Then check TTLs and secondary records.", at: 0)
+        await hub.finish(at: 0)
+
+        for _ in 0..<40 where await hub.count() < 2 {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let queuedStartedCount = await hub.count()
+        XCTAssertEqual(queuedStartedCount, 2)
+        await hub.yield("Inspect Event ID 4740 on the PDC emulator to trace the source host.", at: 1)
+        await hub.finish(at: 1)
+
+        for _ in 0..<40 where engine.isStreamingAI {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(engine.currentSession.exchanges.count, 2)
+        XCTAssertEqual(
+            engine.currentSession.exchanges[0].response,
+            "First, verify resolver reachability. Then check TTLs and secondary records."
+        )
+        XCTAssertTrue(engine.currentSession.exchanges[1].response.contains("4740"))
+    }
+
+    @MainActor
+    func testEngineCancelledAnswerDoesNotClobberActiveStream() async throws {
+        let hub = ControlledStreamHub()
+        let engine = AileronEngine(
+            keychain: CountingSecretStore(),
+            databasePath: ":memory:",
+            initialSettings: AppSettings(),
+            aiStreamHandler: { _, _, _, _, messages in
+                let prompt = messages.last?.text ?? ""
+                return AsyncThrowingStream { continuation in
+                    Task {
+                        await hub.register(prompt: prompt, continuation: continuation)
+                    }
+                }
+            },
+            autoBootstrap: false
+        )
+
+        engine.ask("First question", usePendingScreenshot: false)
+        for _ in 0..<40 where await hub.count() < 1 {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        await hub.yield("Partial A ", at: 0)
+
+        engine.ask("Second manual question", usePendingScreenshot: false)
+        for _ in 0..<40 where await hub.count() < 2 {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let activeBId = engine.streamingExchangeId
+        await hub.finish(at: 0)
+        try await Task.sleep(for: .milliseconds(40))
+
+        XCTAssertTrue(engine.isStreamingAI)
+        XCTAssertEqual(engine.streamingExchangeId, activeBId)
+
+        engine.commitTranscribedTurn(text: "How do you investigate a broken Group Policy object?")
+        try await Task.sleep(for: .milliseconds(30))
+        let countDuringB = await hub.count()
+        XCTAssertEqual(countDuringB, 2)
+
+        await hub.yield("Complete answer B with full details.", at: 1)
+        await hub.finish(at: 1)
+
+        for _ in 0..<40 where await hub.count() < 3 {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let countAfterB = await hub.count()
+        XCTAssertEqual(countAfterB, 3)
+        await hub.yield("Run gpresult /r and check Event Viewer GroupPolicy operational logs.", at: 2)
+        await hub.finish(at: 2)
+
+        for _ in 0..<40 where engine.isStreamingAI {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(engine.currentSession.exchanges[1].response, "Complete answer B with full details.")
+        XCTAssertTrue(engine.currentSession.exchanges[2].response.contains("gpresult"))
+    }
+
+    @MainActor
+    func testEngineKeychainCachingAndLocalZeroReads() async throws {
+        let secrets = CountingSecretStore(initial: ["openAI": "sk-test-cached-123456"])
+        var settings = AppSettings()
+        settings.activeProvider = .ollama
+
+        let engine = AileronEngine(
+            keychain: secrets,
+            databasePath: ":memory:",
+            initialSettings: settings,
+            aiStreamHandler: { _, _, _, _, _ in
+                AsyncThrowingStream { continuation in
+                    continuation.yield("Short deterministic test answer with enough length.")
+                    continuation.finish()
+                }
+            },
+            autoBootstrap: false
+        )
+
+        engine.ask("Ollama Q1", usePendingScreenshot: false)
+        for _ in 0..<30 where engine.isStreamingAI {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        engine.ask("Ollama Q2", usePendingScreenshot: false)
+        for _ in 0..<30 where engine.isStreamingAI {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(secrets.readCount, 0)
+
+        engine.settings.activeProvider = .openAI
+        for i in 1...3 {
+            engine.ask("OpenAI Q\(i)", usePendingScreenshot: false)
+            for _ in 0..<30 where engine.isStreamingAI {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+        }
+        XCTAssertEqual(secrets.readCount, 1)
+
+        engine.saveAPIKey("sk-updated-key-987654", for: .openAI)
+        engine.ask("OpenAI Q4", usePendingScreenshot: false)
+        for _ in 0..<30 where engine.isStreamingAI {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(secrets.readCount, 1)
     }
 }

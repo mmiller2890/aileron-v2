@@ -183,7 +183,7 @@ aileron-v2/
 └── scripts/            # AppIcon.icns generator & Hardened Runtime Aileron.app bundler
 ```
 
-Run the core unit test suite (`15` tests covering audio buffering, speech heuristics, endpoint/model security, prompt fencing, diagnostics redaction, storage permissions, themes, and SQLite FTS5):
+Run the core unit test suite (`20` tests covering 32 ms VAD gap separation, long-turn preservation, end-to-end capture-to-answer queueing, cancellation safety, Keychain caching, endpoint/model security, prompt fencing, diagnostics redaction, storage permissions, themes, and SQLite FTS5):
 
 ```bash
 swift test

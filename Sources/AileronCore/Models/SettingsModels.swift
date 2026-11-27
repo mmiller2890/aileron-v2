@@ -144,9 +144,9 @@ public struct VADSettings: Codable, Equatable, Sendable {
 
     public init(
         sensitivity: Float = 0.55,
-        silenceEndMs: Int = 900,
+        silenceEndMs: Int = 750,
         minSpeechMs: Int = 260,
-        maxTurnSeconds: Double = 25.0,
+        maxTurnSeconds: Double = 35.0,
         noiseGateThreshold: Float = 0.0025
     ) {
         self.sensitivity = sensitivity

@@ -51,16 +51,38 @@ public final class AileronEngine {
     public var isGeneratingSummary: Bool = false
     public var bannerNotice: EngineNotice?
 
-    public let keychain: KeychainStore
+    public typealias AIStreamHandler = @Sendable (
+        AIProviderKind,
+        ProviderSettings,
+        String?,
+        String,
+        [AIChatMessage]
+    ) -> AsyncThrowingStream<String, Error>
+
+    private struct CompletedTurnJob: Sendable {
+        let samples16k: [Float]
+        let duration: Double
+        let trailingSpeakerSamples: [Float]
+    }
+
+    public let keychain: any SecretStore
     private let speechEngine: SpeechEngine
+    private let aiStreamHandler: AIStreamHandler
     private let micCapture = MicCapture()
     private var database: DatabaseStore?
     private var captureTask: Task<Void, Never>?
+    private var transcriptionTask: Task<Void, Never>?
+    private var transcriptionContinuation: AsyncStream<CompletedTurnJob>.Continuation?
+    private var pendingTranscriptionCount: Int = 0
+    private var liveTextBusy: Bool = false
+    private var liveSpeakerBusy: Bool = false
     private var micStreamTask: Task<Void, Never>?
     private var accumulatedMicSamples16k: [Float] = []
     private var micPreprocessor = AudioPreprocessor()
     private var aiTask: Task<Void, Never>?
     private var queuedAutoPrompt: String?
+    private var cachedAPIKeys: [AIProviderKind: String] = [:]
+    private var loadedKeyProviders: Set<AIProviderKind> = []
     private var saveTask: Task<Void, Never>?
     private var activeTap: SystemAudioTap?
 
@@ -70,13 +92,17 @@ public final class AileronEngine {
     public var onReregisterHotKeys: (() -> Void)?
 
     public init(
-        keychain: KeychainStore = KeychainStore(),
+        keychain: any SecretStore = KeychainStore(),
         speechEngine: SpeechEngine = SpeechEngine(),
-        databasePath: String? = nil
+        databasePath: String? = nil,
+        initialSettings: AppSettings? = nil,
+        aiStreamHandler: @escaping AIStreamHandler = AIClient.streamCompletion,
+        autoBootstrap: Bool = true
     ) {
         self.keychain = keychain
         self.speechEngine = speechEngine
-        let loadedSettings = SettingsStore.load()
+        self.aiStreamHandler = aiStreamHandler
+        let loadedSettings = initialSettings ?? SettingsStore.load()
         self.settings = loadedSettings
         self.showOnboarding = !loadedSettings.hasCompletedOnboarding
         self.currentSession = SessionRecord(
@@ -90,11 +116,13 @@ public final class AileronEngine {
             self.bannerNotice = EngineNotice(level: .error, message: error.localizedDescription)
         }
 
-        refreshAudioDevices()
-        refreshPermissions()
-        DiagnosticsLog.shared.record(category: "app", message: "AileronEngine initialized")
-        Task {
-            await bootstrapAsync()
+        if autoBootstrap {
+            refreshAudioDevices()
+            refreshPermissions()
+            DiagnosticsLog.shared.record(category: "app", message: "AileronEngine initialized")
+            Task {
+                await bootstrapAsync()
+            }
         }
     }
 
@@ -331,6 +359,8 @@ public final class AileronEngine {
     public func stopListening(reason: EngineNotice? = nil) {
         captureTask?.cancel()
         captureTask = nil
+        transcriptionContinuation?.finish()
+        transcriptionContinuation = nil
         activeTap?.stop()
         activeTap = nil
         telemetry.isCapturing = false
@@ -339,6 +369,8 @@ public final class AileronEngine {
         telemetry.peakLevel = 0
         livePartialText = ""
         livePartialSpeaker = nil
+        liveTextBusy = false
+        liveSpeakerBusy = false
         if let reason {
             bannerNotice = reason
         }
@@ -372,17 +404,29 @@ public final class AileronEngine {
         await speechEngine.resetLiveText()
         await speechEngine.resetLiveSpeakers()
 
+        let (turnStream, turnContinuation) = AsyncStream.makeStream(of: CompletedTurnJob.self)
+        transcriptionContinuation = turnContinuation
+        transcriptionTask?.cancel()
+        transcriptionTask = Task { [weak self] in
+            for await job in turnStream {
+                guard let self else { break }
+                await self.processCompletedTurnJob(job)
+            }
+        }
+
         let preprocessor = AudioPreprocessor(noiseGateThreshold: settings.vad.noiseGateThreshold)
         let segmenter = SpeechSegmenter(settings: settings.vad)
         var rawScratch: [Float] = []
         var vadBuffer: [Float] = []
+        var sileroWindow: [Float] = []
+        var latestNeuralProb: Float?
         var liveTextBatch: [Float] = []
         var liveSpeakerBatch: [Float] = []
         var lastDeviceCheck = Date()
         var currentTap = tap
 
         while !Task.isCancelled {
-            try? await Task.sleep(for: .milliseconds(40))
+            try? await Task.sleep(for: .milliseconds(25))
             if Task.isCancelled { break }
 
             segmenter.settings = settings.vad
@@ -427,15 +471,22 @@ public final class AileronEngine {
                 }
 
                 vadBuffer.append(contentsOf: cleaned)
-                while vadBuffer.count >= 4096 {
-                    let chunk = Array(vadBuffer.prefix(4096))
-                    vadBuffer.removeFirst(4096)
-                    let prob = await speechEngine.vadProbability(samples4096: chunk)
-                    let events = segmenter.process(samples16k: chunk, neuralProbability: prob)
+                while vadBuffer.count >= SpeechSegmenter.frameSamples {
+                    let frame = Array(vadBuffer.prefix(SpeechSegmenter.frameSamples))
+                    vadBuffer.removeFirst(SpeechSegmenter.frameSamples)
+
+                    sileroWindow.append(contentsOf: frame)
+                    if sileroWindow.count >= 4096 {
+                        let window = Array(sileroWindow.prefix(4096))
+                        sileroWindow.removeFirst(4096)
+                        latestNeuralProb = await speechEngine.vadProbability(samples4096: window)
+                    }
+
+                    let events = segmenter.process(samples16k: frame, neuralProbability: latestNeuralProb)
                     telemetry.isSpeechActive = segmenter.isInSpeech
 
                     for event in events {
-                        await handleSegmentEvent(
+                        handleSegmentEvent(
                             event,
                             liveTextBatch: &liveTextBatch,
                             liveSpeakerBatch: &liveSpeakerBatch
@@ -452,7 +503,7 @@ public final class AileronEngine {
                Date().timeIntervalSince(lastAudible) >= Double(settings.idleAutoStopMinutes * 60) {
                 let flushed = segmenter.flush()
                 for event in flushed {
-                    await handleSegmentEvent(event, liveTextBatch: &liveTextBatch, liveSpeakerBatch: &liveSpeakerBatch)
+                    handleSegmentEvent(event, liveTextBatch: &liveTextBatch, liveSpeakerBatch: &liveSpeakerBatch)
                 }
                 stopListening(reason: EngineNotice(
                     level: .warning,
@@ -464,8 +515,10 @@ public final class AileronEngine {
 
         let tailEvents = segmenter.flush()
         for event in tailEvents {
-            await handleSegmentEvent(event, liveTextBatch: &liveTextBatch, liveSpeakerBatch: &liveSpeakerBatch)
+            handleSegmentEvent(event, liveTextBatch: &liveTextBatch, liveSpeakerBatch: &liveSpeakerBatch)
         }
+        transcriptionContinuation?.finish()
+        transcriptionContinuation = nil
         currentTap.stop()
         activeTap = nil
     }
@@ -474,33 +527,50 @@ public final class AileronEngine {
         _ event: SpeechSegmentEvent,
         liveTextBatch: inout [Float],
         liveSpeakerBatch: inout [Float]
-    ) async {
+    ) {
         switch event {
         case .speechStarted:
             liveTextBatch.removeAll(keepingCapacity: true)
             liveSpeakerBatch.removeAll(keepingCapacity: true)
             livePartialText = ""
             livePartialSpeaker = nil
-            await speechEngine.resetLiveText()
+            let engine = speechEngine
+            Task {
+                await engine.resetLiveText()
+            }
 
         case .speechAudio(_, let samples):
             if settings.enableLiveText && speechStatus.liveTextReady {
                 liveTextBatch.append(contentsOf: samples)
-                if liveTextBatch.count >= settings.streamingLatency.batchSamples16k {
+                if liveTextBatch.count >= settings.streamingLatency.batchSamples16k && !liveTextBusy {
                     let batch = liveTextBatch
                     liveTextBatch.removeAll(keepingCapacity: true)
-                    if let partial = try? await speechEngine.feedLiveText(samples16k: batch), !partial.isEmpty {
-                        livePartialText = partial
+                    liveTextBusy = true
+                    let engine = speechEngine
+                    Task { [weak self] in
+                        let partial = try? await engine.feedLiveText(samples16k: batch)
+                        guard let self else { return }
+                        self.liveTextBusy = false
+                        if self.telemetry.isSpeechActive, let partial, !partial.isEmpty {
+                            self.livePartialText = partial
+                        }
                     }
                 }
             }
             if settings.enableSpeakerLabels && speechStatus.speakerLabelsReady {
                 liveSpeakerBatch.append(contentsOf: samples)
-                if liveSpeakerBatch.count >= 5_120 {
+                if liveSpeakerBatch.count >= 5_120 && !liveSpeakerBusy {
                     let batch = liveSpeakerBatch
                     liveSpeakerBatch.removeAll(keepingCapacity: true)
-                    if let speaker = try? await speechEngine.feedLiveSpeakers(samples16k: batch) {
-                        livePartialSpeaker = currentSession.displaySpeaker(for: speaker) ?? speaker
+                    liveSpeakerBusy = true
+                    let engine = speechEngine
+                    Task { [weak self] in
+                        let speaker = try? await engine.feedLiveSpeakers(samples16k: batch)
+                        guard let self else { return }
+                        self.liveSpeakerBusy = false
+                        if self.telemetry.isSpeechActive, let speaker {
+                            self.livePartialSpeaker = self.currentSession.displaySpeaker(for: speaker) ?? speaker
+                        }
                     }
                 }
             }
@@ -510,66 +580,95 @@ public final class AileronEngine {
             livePartialSpeaker = nil
             liveTextBatch.removeAll(keepingCapacity: true)
             liveSpeakerBatch.removeAll(keepingCapacity: true)
-            _ = try? await speechEngine.endLiveSpeakerTurn()
+            let engine = speechEngine
+            Task {
+                _ = try? await engine.endLiveSpeakerTurn()
+            }
 
         case .turnCompleted(_, let samples, let duration):
-            var finalSpeaker: String?
-            if settings.enableSpeakerLabels && speechStatus.speakerLabelsReady {
-                if !liveSpeakerBatch.isEmpty {
-                    _ = try? await speechEngine.feedLiveSpeakers(samples16k: liveSpeakerBatch)
-                    liveSpeakerBatch.removeAll(keepingCapacity: true)
-                }
-                finalSpeaker = try? await speechEngine.endLiveSpeakerTurn()
-            }
+            let trailingSpeakers = liveSpeakerBatch
             livePartialText = ""
             livePartialSpeaker = nil
             liveTextBatch.removeAll(keepingCapacity: true)
+            liveSpeakerBatch.removeAll(keepingCapacity: true)
+            pendingTranscriptionCount += 1
             isTranscribing = true
+            transcriptionContinuation?.yield(CompletedTurnJob(
+                samples16k: samples,
+                duration: duration,
+                trailingSpeakerSamples: trailingSpeakers
+            ))
+        }
+    }
 
-            do {
-                let outcome = try await speechEngine.transcribe(samples16k: samples)
-                isTranscribing = false
-                telemetry.lastRtfx = outcome.rtfx
-                telemetry.lastTranscribeMs = Int(outcome.processingSeconds * 1000)
+    private func processCompletedTurnJob(_ job: CompletedTurnJob) async {
+        defer {
+            pendingTranscriptionCount = max(0, pendingTranscriptionCount - 1)
+            isTranscribing = pendingTranscriptionCount > 0
+        }
 
-                let text = outcome.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !text.isEmpty else { return }
-                if settings.filterBackchannels && BackchannelFilter.isBackchannel(text) {
-                    return
-                }
+        var finalSpeaker: String?
+        if settings.enableSpeakerLabels && speechStatus.speakerLabelsReady {
+            if !job.trailingSpeakerSamples.isEmpty {
+                _ = try? await speechEngine.feedLiveSpeakers(samples16k: job.trailingSpeakerSamples)
+            }
+            finalSpeaker = try? await speechEngine.endLiveSpeakerTurn()
+        }
 
-                let isQuestion = QuestionGate.isLikelyQuestion(text)
-                let turn = TranscriptTurn(
-                    sequence: currentSession.turns.count + 1,
-                    text: text,
-                    speaker: finalSpeaker,
-                    isQuestion: isQuestion,
-                    confidence: outcome.confidence,
-                    durationSeconds: duration,
-                    source: .system
-                )
-                currentSession.turns.append(turn)
-                currentSession.updatedAt = Date()
-                if currentSession.turns.count == 1 && currentSession.title.hasPrefix("Session ") {
-                    currentSession.title = Self.deriveTitle(from: text)
-                }
-                schedulePersistSession()
-                DiagnosticsLog.shared.record(
-                    category: "speech",
-                    message: "Turn #\(turn.sequence) committed (\(Int(duration * 1000)) ms, question=\(isQuestion))"
-                )
+        do {
+            let outcome = try await speechEngine.transcribe(samples16k: job.samples16k)
+            telemetry.lastRtfx = outcome.rtfx
+            telemetry.lastTranscribeMs = Int(outcome.processingSeconds * 1000)
+            commitTranscribedTurn(
+                text: outcome.text,
+                confidence: outcome.confidence,
+                duration: job.duration,
+                speaker: finalSpeaker
+            )
+        } catch {
+            DiagnosticsLog.shared.record(category: "speech", message: "Transcription failed: \(error.localizedDescription)")
+            bannerNotice = EngineNotice(level: .error, message: "Transcription failed: \(error.localizedDescription)")
+        }
+    }
 
-                if settings.autoAnswerQuestions && isQuestion {
-                    if isStreamingAI {
-                        queuedAutoPrompt = text
-                    } else {
-                        ask(text, usePendingScreenshot: false, isCapturedSpeech: true, triggeredAutomatically: true)
-                    }
-                }
-            } catch {
-                isTranscribing = false
-                DiagnosticsLog.shared.record(category: "speech", message: "Transcription failed: \(error.localizedDescription)")
-                bannerNotice = EngineNotice(level: .error, message: "Transcription failed: \(error.localizedDescription)")
+    internal func commitTranscribedTurn(
+        text rawText: String,
+        confidence: Float = 1.0,
+        duration: Double = 1.0,
+        speaker: String? = nil
+    ) {
+        let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        if settings.filterBackchannels && BackchannelFilter.isBackchannel(text) {
+            return
+        }
+
+        let isQuestion = QuestionGate.isLikelyQuestion(text)
+        let turn = TranscriptTurn(
+            sequence: currentSession.turns.count + 1,
+            text: text,
+            speaker: speaker,
+            isQuestion: isQuestion,
+            confidence: confidence,
+            durationSeconds: duration,
+            source: .system
+        )
+        currentSession.turns.append(turn)
+        currentSession.updatedAt = Date()
+        if currentSession.turns.count == 1 && currentSession.title.hasPrefix("Session ") {
+            currentSession.title = Self.deriveTitle(from: text)
+        }
+        schedulePersistSession()
+        DiagnosticsLog.shared.record(
+            category: "speech",
+            message: "Turn #\(turn.sequence) committed (\(Int(duration * 1000)) ms, question=\(isQuestion))"
+        )
+
+        if settings.autoAnswerQuestions && isQuestion {
+            if isStreamingAI {
+                queuedAutoPrompt = text
+            } else {
+                ask(text, usePendingScreenshot: false, isCapturedSpeech: true, triggeredAutomatically: true)
             }
         }
     }
@@ -805,7 +904,7 @@ public final class AileronEngine {
 
         let provider = settings.activeProvider
         let config = settings.config(for: provider)
-        let apiKey = keychain.secret(for: provider.rawValue)
+        let apiKey = resolvedAPIKey(for: provider)
         let screenshot = usePendingScreenshot ? pendingScreenshot : nil
         if usePendingScreenshot {
             pendingScreenshot = nil
@@ -842,19 +941,14 @@ public final class AileronEngine {
         isStreamingAI = true
         streamingExchangeId = exchangeId
         let startedAt = Date()
+        let streamer = aiStreamHandler
 
         aiTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let stream = AIClient.streamCompletion(
-                    provider: provider,
-                    config: config,
-                    apiKey: apiKey,
-                    systemPrompt: systemPrompt,
-                    messages: messages
-                )
+                let stream = streamer(provider, config, apiKey, systemPrompt, messages)
                 for try await chunk in stream {
-                    if Task.isCancelled { break }
+                    if Task.isCancelled || self.streamingExchangeId != exchangeId { break }
                     if let idx = self.currentSession.exchanges.firstIndex(where: { $0.id == exchangeId }) {
                         self.currentSession.exchanges[idx].response += chunk
                     }
@@ -862,16 +956,19 @@ public final class AileronEngine {
                 if let idx = self.currentSession.exchanges.firstIndex(where: { $0.id == exchangeId }) {
                     self.currentSession.exchanges[idx].latencyMs = Int(Date().timeIntervalSince(startedAt) * 1000)
                 }
-                self.isStreamingAI = false
-                self.streamingExchangeId = nil
                 self.currentSession.updatedAt = Date()
                 self.schedulePersistSession()
 
-                if !Task.isCancelled, let nextPrompt = self.queuedAutoPrompt {
+                guard !Task.isCancelled, self.streamingExchangeId == exchangeId else { return }
+                self.isStreamingAI = false
+                self.streamingExchangeId = nil
+
+                if let nextPrompt = self.queuedAutoPrompt {
                     self.queuedAutoPrompt = nil
                     self.ask(nextPrompt, usePendingScreenshot: false, isCapturedSpeech: true, triggeredAutomatically: true)
                 }
             } catch {
+                guard self.streamingExchangeId == exchangeId else { return }
                 self.isStreamingAI = false
                 self.streamingExchangeId = nil
                 self.queuedAutoPrompt = nil
@@ -896,19 +993,14 @@ public final class AileronEngine {
         isGeneratingSummary = true
         let provider = settings.activeProvider
         let config = settings.config(for: provider)
-        let apiKey = keychain.secret(for: provider.rawValue)
+        let apiKey = resolvedAPIKey(for: provider)
         let (system, user) = PromptComposer.composeSummaryPrompt(session: currentSession)
+        let streamer = aiStreamHandler
 
         Task {
             var accumulated = ""
             do {
-                let stream = AIClient.streamCompletion(
-                    provider: provider,
-                    config: config,
-                    apiKey: apiKey,
-                    systemPrompt: system,
-                    messages: [AIChatMessage(role: .user, text: user)]
-                )
+                let stream = streamer(provider, config, apiKey, system, [AIChatMessage(role: .user, text: user)])
                 for try await chunk in stream {
                     accumulated += chunk
                     currentSession.summary = accumulated
@@ -1056,12 +1148,26 @@ public final class AileronEngine {
         }
     }
 
+    private func resolvedAPIKey(for provider: AIProviderKind) -> String? {
+        guard provider.requiresAPIKey else { return nil }
+        if loadedKeyProviders.contains(provider) {
+            return cachedAPIKeys[provider]
+        }
+        let secret = keychain.secret(for: provider.rawValue)
+        loadedKeyProviders.insert(provider)
+        cachedAPIKeys[provider] = secret
+        return secret
+    }
+
     public func saveAPIKey(_ key: String, for provider: AIProviderKind) {
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
-            try keychain.setSecret(key, for: provider.rawValue)
+            try keychain.setSecret(trimmed, for: provider.rawValue)
+            loadedKeyProviders.insert(provider)
+            cachedAPIKeys[provider] = trimmed.isEmpty ? nil : trimmed
             bannerNotice = EngineNotice(
                 level: .info,
-                message: key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                message: trimmed.isEmpty
                     ? "Removed API key for \(provider.displayName) from Keychain."
                     : "Saved API key for \(provider.displayName) in macOS Keychain."
             )
@@ -1071,13 +1177,17 @@ public final class AileronEngine {
     }
 
     public func hasAPIKey(for provider: AIProviderKind) -> Bool {
-        keychain.hasSecret(for: provider.rawValue)
+        guard provider.requiresAPIKey else { return false }
+        if loadedKeyProviders.contains(provider) {
+            return cachedAPIKeys[provider] != nil
+        }
+        return keychain.hasSecret(for: provider.rawValue)
     }
 
     public func testActiveProvider() async -> Result<Int, Error> {
         let provider = settings.activeProvider
         let config = settings.config(for: provider)
-        let key = keychain.secret(for: provider.rawValue)
+        let key = resolvedAPIKey(for: provider)
         do {
             let latency = try await AIClient.testConnection(provider: provider, config: config, apiKey: key)
             return .success(latency)

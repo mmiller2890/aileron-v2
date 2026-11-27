@@ -54,8 +54,8 @@ public enum AileronHotKey: UInt32, CaseIterable, Sendable {
 @MainActor
 public final class HotKeyManager {
     private static let signature: OSType = 0x41494C52
-    private var eventHandlerRef: EventHandlerRef?
-    private var hotKeyRefs: [EventHotKeyRef] = []
+    nonisolated(unsafe) private var eventHandlerRef: EventHandlerRef?
+    nonisolated(unsafe) private var hotKeyRefs: [EventHotKeyRef] = []
     private let onTrigger: @MainActor (AileronHotKey) -> Void
     public private(set) var registrationStatuses: [UInt32: Bool] = [:]
 

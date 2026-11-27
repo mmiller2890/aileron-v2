@@ -39,6 +39,8 @@ public final class SystemAudioTap: @unchecked Sendable {
     private let ringBuffer: AudioRingBuffer
     private let sampleRateLock: OSAllocatedUnfairLock<Double>
     private let stateLock = NSLock()
+    private let listenerQueue = DispatchQueue(label: "com.aileron.tap.rate", qos: .utility)
+    private var rateListenerBlock: AudioObjectPropertyListenerBlock?
     private var tapID: AudioObjectID = kAudioObjectUnknown
     private var aggregateDeviceID: AudioDeviceID = kAudioObjectUnknown
     private var ioProcID: AudioDeviceIOProcID?
@@ -105,7 +107,7 @@ public final class SystemAudioTap: @unchecked Sendable {
 
         let initialRate = asbd.mSampleRate
         self.sampleRateLock = OSAllocatedUnfairLock(initialState: initialRate)
-        self.ringBuffer = AudioRingBuffer(capacity: max(96_000, Int(initialRate) * 6))
+        self.ringBuffer = AudioRingBuffer(capacity: max(320_000, Int(initialRate) * 20))
 
         let aggregateUID = "com.aileron.tap.\(UUID().uuidString)"
         let aggregateDesc: [String: Any] = [
@@ -141,11 +143,26 @@ public final class SystemAudioTap: @unchecked Sendable {
         let capturedRateLock = self.sampleRateLock
         let capturedAggID = createdAggID
 
-        var createdProcID: AudioDeviceIOProcID?
-        let procStatus = AudioDeviceCreateIOProcIDWithBlock(&createdProcID, createdAggID, nil) { _, inInputData, _, _, _ in
+        if let actual = AudioDeviceManager.actualSampleRate(for: createdAggID), actual > 0 {
+            capturedRateLock.withLock { $0 = actual }
+        }
+
+        var rateAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyNominalSampleRate,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        let listenerBlock: AudioObjectPropertyListenerBlock = { _, _ in
             if let liveRate = AudioDeviceManager.actualSampleRate(for: capturedAggID), liveRate > 0 {
                 capturedRateLock.withLock { $0 = liveRate }
             }
+        }
+        if AudioObjectAddPropertyListenerBlock(createdAggID, &rateAddress, listenerQueue, listenerBlock) == noErr {
+            self.rateListenerBlock = listenerBlock
+        }
+
+        var createdProcID: AudioDeviceIOProcID?
+        let procStatus = AudioDeviceCreateIOProcIDWithBlock(&createdProcID, createdAggID, nil) { _, inInputData, _, _, _ in
             let buffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: inInputData))
             guard let first = buffers.first, let rawData = first.mData, first.mDataByteSize > 0 else {
                 return
@@ -163,6 +180,10 @@ public final class SystemAudioTap: @unchecked Sendable {
             }
         }
         guard procStatus == noErr, let validProcID = createdProcID else {
+            if let block = self.rateListenerBlock {
+                AudioObjectRemovePropertyListenerBlock(createdAggID, &rateAddress, listenerQueue, block)
+                self.rateListenerBlock = nil
+            }
             AudioHardwareDestroyAggregateDevice(createdAggID)
             AudioHardwareDestroyProcessTap(createdTapID)
             throw SystemAudioTapError.ioProcCreationFailed(procStatus)
@@ -171,6 +192,10 @@ public final class SystemAudioTap: @unchecked Sendable {
 
         let startStatus = AudioDeviceStart(createdAggID, validProcID)
         guard startStatus == noErr else {
+            if let block = self.rateListenerBlock {
+                AudioObjectRemovePropertyListenerBlock(createdAggID, &rateAddress, listenerQueue, block)
+                self.rateListenerBlock = nil
+            }
             AudioDeviceDestroyIOProcID(createdAggID, validProcID)
             AudioHardwareDestroyAggregateDevice(createdAggID)
             AudioHardwareDestroyProcessTap(createdTapID)
@@ -186,6 +211,15 @@ public final class SystemAudioTap: @unchecked Sendable {
     public func stop() {
         stateLock.lock()
         defer { stateLock.unlock() }
+        if aggregateDeviceID != kAudioObjectUnknown, let block = rateListenerBlock {
+            var rateAddress = AudioObjectPropertyAddress(
+                mSelector: kAudioDevicePropertyNominalSampleRate,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain
+            )
+            AudioObjectRemovePropertyListenerBlock(aggregateDeviceID, &rateAddress, listenerQueue, block)
+            rateListenerBlock = nil
+        }
         if isRunning, aggregateDeviceID != kAudioObjectUnknown, let proc = ioProcID {
             AudioDeviceStop(aggregateDeviceID, proc)
             isRunning = false

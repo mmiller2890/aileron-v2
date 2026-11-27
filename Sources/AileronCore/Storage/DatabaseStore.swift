@@ -17,8 +17,21 @@ public enum DatabaseError: LocalizedError {
 
 private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
+private final class SQLiteConnection: @unchecked Sendable {
+    let raw: OpaquePointer
+
+    init(_ raw: OpaquePointer) {
+        self.raw = raw
+    }
+
+    deinit {
+        sqlite3_close(raw)
+    }
+}
+
 public actor DatabaseStore {
-    private var db: OpaquePointer?
+    private let connection: SQLiteConnection
+    private var db: OpaquePointer? { connection.raw }
 
     public init(path: String? = nil) throws {
         let resolvedPath: String
@@ -37,7 +50,7 @@ public actor DatabaseStore {
             if let handle { sqlite3_close(handle) }
             throw DatabaseError.openFailed(msg)
         }
-        self.db = validHandle
+        self.connection = SQLiteConnection(validHandle)
         try Self.bootstrapSchema(db: validHandle)
         if resolvedPath != ":memory:" {
             for suffix in ["", "-wal", "-shm"] {
@@ -46,12 +59,6 @@ public actor DatabaseStore {
                     SettingsStore.enforcePrivatePermissions(at: candidate, isDirectory: false)
                 }
             }
-        }
-    }
-
-    deinit {
-        if let db {
-            sqlite3_close(db)
         }
     }
 
