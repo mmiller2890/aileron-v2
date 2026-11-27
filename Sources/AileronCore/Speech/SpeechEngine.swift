@@ -1,4 +1,5 @@
 import AVFoundation
+import CSileroVad
 import FluidAudio
 import Foundation
 
@@ -24,34 +25,48 @@ public enum SpeechEngineError: LocalizedError {
     }
 }
 
-private actor VadSession {
-    private var vadManager: VadManager?
-    private var vadStreamState: VadStreamState?
+private final class SileroVadHandle: @unchecked Sendable {
+    let raw: UnsafeMutablePointer<SileroVadModel>
 
-    var isReady: Bool { vadManager != nil }
-
-    func initialize(threshold: Float) async throws {
-        if vadManager != nil { return }
-        let config = VadConfig(defaultThreshold: threshold)
-        let manager = try await VadManager(config: config)
-        self.vadManager = manager
-        self.vadStreamState = await manager.makeStreamState()
-    }
-
-    func probability(samples4096: [Float]) async -> Float? {
-        guard let manager = vadManager, let state = vadStreamState else { return nil }
-        do {
-            let result = try await manager.processStreamingChunk(samples4096, state: state)
-            self.vadStreamState = result.state
-            return result.probability
-        } catch {
+    init?() {
+        guard let weights = silero_vad_get_embedded_weights(),
+              let created = silero_vad_model_create(weights, Int(SILERO_VAD_INPUT_SAMPLES)) else {
             return nil
         }
+        self.raw = created
     }
 
-    func reset() async {
-        guard let manager = vadManager else { return }
-        vadStreamState = await manager.makeStreamState()
+    deinit {
+        silero_vad_model_destroy(raw)
+    }
+}
+
+private actor VadSession {
+    private var handle: SileroVadHandle?
+
+    var isReady: Bool { handle != nil }
+
+    func initialize() throws {
+        if handle != nil { return }
+        guard let created = SileroVadHandle() else {
+            throw SpeechEngineError.audioBufferCreationFailed
+        }
+        self.handle = created
+    }
+
+    func probability(samples512: [Float]) -> Float? {
+        guard let handle, samples512.count == Int(SILERO_VAD_WINDOW_SAMPLES) else { return nil }
+        var prob: Float = 0
+        let status = samples512.withUnsafeBufferPointer { buf -> SileroVadStatus in
+            guard let base = buf.baseAddress else { return SILERO_VAD_STATUS_INVALID_ARGUMENT }
+            return silero_vad_model_forward_source_chunk(handle.raw, base, buf.count, &prob)
+        }
+        return status == SILERO_VAD_STATUS_OK ? prob : nil
+    }
+
+    func reset() {
+        guard let handle else { return }
+        silero_vad_model_reset(handle.raw)
     }
 }
 
@@ -115,7 +130,7 @@ public actor SpeechEngine {
     }
 
     public nonisolated func initializeVad(threshold: Float = 0.5) async throws {
-        try await vadSession.initialize(threshold: threshold)
+        try await vadSession.initialize()
     }
 
     public func initializeLiveText(
@@ -221,8 +236,8 @@ public actor SpeechEngine {
         )
     }
 
-    public nonisolated func vadProbability(samples4096: [Float]) async -> Float? {
-        await vadSession.probability(samples4096: samples4096)
+    public nonisolated func vadProbability(samples512: [Float]) async -> Float? {
+        await vadSession.probability(samples512: samples512)
     }
 
     public nonisolated func resetVad() async {

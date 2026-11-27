@@ -426,12 +426,25 @@ final class AileronCoreTests: XCTestCase {
         XCTAssertEqual(dbPerms, 0o600)
     }
 
-    func testSpeechSegmenter32msSilenceDetectionAndGapSeparation() {
+    func testSpeechSegmenter32msSilenceDetectionAndGapSeparation() async throws {
+        let speechEngine = SpeechEngine()
+        try await speechEngine.initializeVad()
+        let vadReady = await speechEngine.isVadReady
+        XCTAssertTrue(vadReady)
+
+        let zeroFrame = [Float](repeating: 0.0, count: SpeechSegmenter.frameSamples)
+        for _ in 0..<10 {
+            let p = await speechEngine.vadProbability(samples512: zeroFrame)
+            let prob = try XCTUnwrap(p)
+            XCTAssertLessThan(prob, 0.1)
+        }
+        await speechEngine.resetVad()
+
         let settings = VADSettings(sensitivity: 0.55, silenceEndMs: 750, minSpeechMs: 260, maxTurnSeconds: 35)
         let segmenter = SpeechSegmenter(settings: settings)
 
         let voiceFrame = [Float](repeating: 0.18, count: SpeechSegmenter.frameSamples)
-        let silentFrame = [Float](repeating: 0.0, count: SpeechSegmenter.frameSamples)
+        let noisyGapFrame = [Float](repeating: 0.02, count: SpeechSegmenter.frameSamples)
 
         var completedCount = 0
         for _ in 0..<20 {
@@ -440,8 +453,8 @@ final class AileronCoreTests: XCTestCase {
         }
         XCTAssertTrue(segmenter.isInSpeech)
 
-        for _ in 0..<28 {
-            let events = segmenter.process(samples16k: silentFrame, neuralProbability: 0.85)
+        for _ in 0..<26 {
+            let events = segmenter.process(samples16k: noisyGapFrame, neuralProbability: 0.10)
             completedCount += events.filter { if case .turnCompleted = $0 { return true }; return false }.count
         }
         XCTAssertEqual(completedCount, 1)
@@ -451,11 +464,16 @@ final class AileronCoreTests: XCTestCase {
             let events = segmenter.process(samples16k: voiceFrame, neuralProbability: 0.90)
             completedCount += events.filter { if case .turnCompleted = $0 { return true }; return false }.count
         }
-        for _ in 0..<28 {
-            let events = segmenter.process(samples16k: silentFrame, neuralProbability: 0.85)
+        for _ in 0..<26 {
+            let events = segmenter.process(samples16k: noisyGapFrame, neuralProbability: 0.10)
             completedCount += events.filter { if case .turnCompleted = $0 { return true }; return false }.count
         }
         XCTAssertEqual(completedCount, 2)
+
+        let quietUtterance = (0..<1600).map { i in Float(sin(Double(i) * 0.12)) * 0.015 }
+        let prepared = AudioPreprocessor.prepareForTranscription(quietUtterance, noiseGateThreshold: 0.0015)
+        XCTAssertGreaterThan(AudioPreprocessor.measureLevels(prepared).rms, AudioPreprocessor.measureLevels(quietUtterance).rms)
+        XCTAssertTrue(prepared.allSatisfy { abs($0) <= 1.0 })
     }
 
     func testSpeechSegmenterLongQuestionNotSplitAtShortPause() {

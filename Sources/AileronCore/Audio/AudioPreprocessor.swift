@@ -126,4 +126,32 @@ public final class AudioPreprocessor {
         }
         return (processed, rawLevels)
     }
+
+    public static func prepareForTranscription(
+        _ samples: [Float],
+        noiseGateThreshold: Float = 0.0015,
+        targetRMS: Float = 0.10,
+        maxGain: Float = 6.0
+    ) -> [Float] {
+        guard !samples.isEmpty else { return [] }
+        let threshold = max(0, noiseGateThreshold)
+        var gated = [Float](repeating: 0, count: samples.count)
+        for i in 0..<samples.count {
+            let s = samples[i].isFinite ? samples[i] : 0
+            let a = abs(s)
+            if threshold > 0 && a < threshold {
+                gated[i] = s * powf(a / threshold, 1.0 / 3.0)
+            } else {
+                gated[i] = s
+            }
+        }
+        let rms = measureLevels(gated).rms
+        guard rms >= 0.001 else { return gated }
+        let gain = min(maxGain, max(0.5, targetRMS / rms))
+        var out = [Float](repeating: 0, count: gated.count)
+        for i in 0..<gated.count {
+            out[i] = softClip(gated[i] * gain, knee: 0.9)
+        }
+        return out
+    }
 }

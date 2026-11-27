@@ -418,8 +418,6 @@ public final class AileronEngine {
         let segmenter = SpeechSegmenter(settings: settings.vad)
         var rawScratch: [Float] = []
         var vadBuffer: [Float] = []
-        var sileroWindow: [Float] = []
-        var latestNeuralProb: Float?
         var liveTextBatch: [Float] = []
         var liveSpeakerBatch: [Float] = []
         var lastDeviceCheck = Date()
@@ -462,27 +460,21 @@ public final class AileronEngine {
             telemetry.sampleRate = rate
 
             if !rawScratch.isEmpty {
-                let resampled = preprocessor.resampleTo16k(rawScratch, inputSampleRate: rate)
-                let (cleaned, levels) = preprocessor.process(resampled)
+                let raw16k = preprocessor.resampleTo16k(rawScratch, inputSampleRate: rate)
+                let levels = AudioPreprocessor.measureLevels(raw16k)
                 telemetry.rmsLevel = levels.rms
                 telemetry.peakLevel = levels.peak
                 if levels.rms > 0.002 {
                     telemetry.lastAudibleAt = Date()
                 }
 
-                vadBuffer.append(contentsOf: cleaned)
+                vadBuffer.append(contentsOf: raw16k)
                 while vadBuffer.count >= SpeechSegmenter.frameSamples {
                     let frame = Array(vadBuffer.prefix(SpeechSegmenter.frameSamples))
                     vadBuffer.removeFirst(SpeechSegmenter.frameSamples)
 
-                    sileroWindow.append(contentsOf: frame)
-                    if sileroWindow.count >= 4096 {
-                        let window = Array(sileroWindow.prefix(4096))
-                        sileroWindow.removeFirst(4096)
-                        latestNeuralProb = await speechEngine.vadProbability(samples4096: window)
-                    }
-
-                    let events = segmenter.process(samples16k: frame, neuralProbability: latestNeuralProb)
+                    let prob = await speechEngine.vadProbability(samples512: frame)
+                    let events = segmenter.process(samples16k: frame, neuralProbability: prob)
                     telemetry.isSpeechActive = segmenter.isInSpeech
 
                     for event in events {
@@ -616,7 +608,11 @@ public final class AileronEngine {
         }
 
         do {
-            let outcome = try await speechEngine.transcribe(samples16k: job.samples16k)
+            let prepared = AudioPreprocessor.prepareForTranscription(
+                job.samples16k,
+                noiseGateThreshold: settings.vad.noiseGateThreshold
+            )
+            let outcome = try await speechEngine.transcribe(samples16k: prepared)
             telemetry.lastRtfx = outcome.rtfx
             telemetry.lastTranscribeMs = Int(outcome.processingSeconds * 1000)
             commitTranscribedTurn(

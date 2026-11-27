@@ -20,7 +20,7 @@ public final class SpeechSegmenter {
     private var speechBuffer: [Float] = []
     private var silenceSampleCount: Int = 0
     private var activeSpeechSampleCount: Int = 0
-    private var noiseFloorRMS: Float = 0.001
+    public private(set) var lastFrameWasVoice: Bool = false
 
     public var isInSpeech: Bool { activeTurnId != nil }
 
@@ -35,33 +35,26 @@ public final class SpeechSegmenter {
         speechBuffer.removeAll(keepingCapacity: true)
         silenceSampleCount = 0
         activeSpeechSampleCount = 0
-        noiseFloorRMS = 0.001
+        lastFrameWasVoice = false
     }
 
     public func process(samples16k: [Float], neuralProbability: Float?) -> [SpeechSegmentEvent] {
         guard !samples16k.isEmpty else { return [] }
         var events: [SpeechSegmentEvent] = []
 
-        let startThreshold = max(0.15, min(0.90, 1.0 - settings.sensitivity + 0.15))
-        let sustainThreshold = startThreshold * 0.65
-        let energy = AudioPreprocessor.measureLevels(samples16k).rms
-        let energyStart = max(0.008, settings.noiseGateThreshold * 3.5)
-        let silenceFloor = max(settings.noiseGateThreshold * 2.0, noiseFloorRMS * 2.2)
-
-        if activeTurnId == nil && energy < energyStart {
-            noiseFloorRMS = noiseFloorRMS * 0.92 + energy * 0.08
-        }
+        let startThreshold = max(0.20, min(0.85, 1.0 - settings.sensitivity + 0.05))
+        let sustainThreshold = startThreshold * 0.70
 
         let isVoice: Bool
         if let prob = neuralProbability {
-            if activeTurnId == nil {
-                isVoice = prob >= startThreshold && energy >= silenceFloor
-            } else {
-                isVoice = prob >= sustainThreshold && energy >= silenceFloor
-            }
+            isVoice = activeTurnId == nil ? (prob >= startThreshold) : (prob >= sustainThreshold)
         } else {
-            isVoice = activeTurnId == nil ? (energy >= energyStart) : (energy >= silenceFloor)
+            let energy = AudioPreprocessor.measureLevels(samples16k).rms
+            let energyStart = max(0.008, settings.noiseGateThreshold * 3.5)
+            let energySustain = energyStart * 0.6
+            isVoice = activeTurnId == nil ? (energy >= energyStart) : (energy >= energySustain)
         }
+        lastFrameWasVoice = isVoice
 
         if let currentId = activeTurnId {
             speechBuffer.append(contentsOf: samples16k)

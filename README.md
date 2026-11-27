@@ -25,7 +25,7 @@
 An *aileron* keeps an aircraft level and responsive in real time without getting in the pilot's way. Aileron brings that same quiet discipline to your Mac:
 
 - **Zero Browser Overhead:** One lightweight native macOS process linking `FluidAudio` directly — no Electron, no WKWebView, no Rust↔Swift FFI marshaling, and no base64 audio round-trips.
-- **On-Device Ears:** System audio is tapped straight from macOS CoreAudio (no BlackHole or virtual cables), segmented locally with **Silero CoreML VAD**, streamed live via **Parakeet Realtime EOU**, refined with **Parakeet TDT v3**, and speaker-labeled with **Sortformer**.
+- **On-Device Ears:** System audio is tapped straight from macOS CoreAudio (no BlackHole or virtual cables), segmented locally every **32 ms** on unboosted audio with embedded NEON **Silero VAD** (zero CoreML download or RAM overhead), streamed live via **Parakeet Realtime EOU**, refined with **Parakeet TDT v3**, and speaker-labeled with **Sortformer**.
 - **Quietly Invisible:** Native `NSWindow.SharingType.none` hides both the floating bar and main workspace from Zoom, Google Meet, Microsoft Teams, and screen recordings.
 - **Yours to Style:** Calm collapsible sidebars paired with a theme studio, vintage French poster palettes, and an unmistakable Art Deco emblem.
 
@@ -163,6 +163,7 @@ Configure live caption responsiveness in **Settings → Audio → Streaming Chun
 ```text
 aileron-v2/
 ├── Sources/
+│   ├── CSileroVad/     # MIT-licensed embedded 32 ms NEON Silero VAD C engine (zero runtime download)
 │   ├── AileronCore/
 │   │   ├── Audio/      # CoreAudio Process Tap, MicCapture, AudioDeviceManager, RingBuffer, Preprocessor, VAD Segmenter
 │   │   ├── Speech/     # Direct FluidAudio SpeechEngine (Parakeet v3, EOU Streaming, Sortformer) & QuestionGate/Heuristics

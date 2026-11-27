@@ -24,8 +24,19 @@ let package = Package(
     ],
     targets: [
         .target(
+            name: "CSileroVad",
+            path: "Sources/CSileroVad",
+            exclude: ["LICENSE"],
+            publicHeadersPath: "include",
+            cSettings: [
+                .headerSearchPath("include/dsp"),
+                .define("SILERO_VAD_ENABLE_NEON", to: "1")
+            ]
+        ),
+        .target(
             name: "AileronCore",
             dependencies: [
+                "CSileroVad",
                 .product(name: "FluidAudio", package: "FluidAudio")
             ],
             path: "Sources/AileronCore",
