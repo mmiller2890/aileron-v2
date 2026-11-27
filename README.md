@@ -76,20 +76,40 @@ Open **Settings → Appearance** to tune the workspace live across both windows:
 ### Requirements
 
 - **Apple Silicon Mac** (M1 / M2 / M3 / M4) running **macOS 14.2 Sonoma or newer**
-- **Xcode 16+** or **Swift 6** Command Line Tools
-- Optional: [Ollama](https://ollama.com) or [LM Studio](https://lmstudio.ai) for 100% offline AI (or any OpenAI / Anthropic / Gemini / Groq API key stored in macOS Keychain)
+- AI backend: [Ollama](https://ollama.com) / [LM Studio](https://lmstudio.ai) for 100% local AI, **or** any OpenAI / Anthropic / Gemini / Groq API key (stored in macOS Keychain)
 
-### Build, Bundle & Launch (3 Steps)
+### Option 1: One-Line Install (Recommended — No Xcode Needed)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mmiller2890/aileron-v2/main/install.sh | bash
+```
+
+Downloads the latest Apple Silicon release, verifies its SHA-256 checksum, installs `/Applications/Aileron.app`, clears browser quarantine, and opens Aileron in ~10 seconds.
+
+### Option 2: Direct Download (`.dmg` or `.zip`)
+
+Download `Aileron-v2.0.0-arm64.dmg` from the **[Latest GitHub Release](https://github.com/mmiller2890/aileron-v2/releases/latest)** and drag **Aileron** into **Applications**.
+
+> **First-open macOS note:** Aileron is currently ad-hoc signed (not Apple-notarized). If macOS warns when opening a browser-downloaded `.dmg`, run `xattr -cr /Applications/Aileron.app` once in Terminal — or use the one-line installer above.
+
+### 30-Second First Run
+
+1. **Permissions:** Complete the guided setup sheet (System Audio Recording & Microphone).
+2. **Pick an AI Model:** Open **Models & Speech** to use **Ollama (Local)** or switch to **OpenAI**, **Anthropic**, **Google Gemini**, or **Groq** and paste your API key.
+3. **Click Listen (`⌘⇧A`):** Embedded 32 ms Silero VAD is ready instantly; Parakeet speech models (~1.2 GB) download once on first use, then run 100% on-device.
+
+### Option 3: Build from Source
+
+Requires **Xcode 16+** or **Swift 6** Command Line Tools:
 
 ```bash
 git clone https://github.com/mmiller2890/aileron-v2.git
 cd aileron-v2
-chmod +x scripts/bundle-app.sh scripts/generate-icon.swift
 ./scripts/bundle-app.sh release
 open build/Aileron.app
 ```
 
-> **Tip:** Use `./scripts/bundle-app.sh debug` for quick incremental builds during development, or install permanently with `cp -R build/Aileron.app /Applications/Aileron.app`.
+> **Tip:** Use `./scripts/bundle-app.sh debug` for fast incremental builds, or `./scripts/package-release.sh` to create a `.zip` + `.dmg` with SHA-256 checksums.
 
 ### First-Run Setup & Permissions
 
@@ -181,7 +201,8 @@ aileron-v2/
 │   └── AileronCoreTests/
 ├── entitlements/       # Minimal Hardened Runtime entitlements
 ├── assets/             # Graphic-print Art Deco SVG banner, emblem, dividers & theme swatches
-└── scripts/            # AppIcon.icns generator & Hardened Runtime Aileron.app bundler
+├── install.sh          # One-line SHA-256 verified Apple Silicon installer
+└── scripts/            # AppIcon.icns generator, Hardened Runtime bundler & .dmg/.zip release packager
 ```
 
 Run the core unit test suite (`20` tests covering 32 ms VAD gap separation, long-turn preservation, end-to-end capture-to-answer queueing, cancellation safety, Keychain caching, endpoint/model security, prompt fencing, diagnostics redaction, storage permissions, themes, and SQLite FTS5):
