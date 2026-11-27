@@ -9,7 +9,7 @@
   <img src="https://img.shields.io/badge/Privacy-Local--First-72B2D4?style=for-the-badge&labelColor=121417" alt="Local-First" />
 </p>
 
-<h3 align="center">Built like a precision flight instrument — not a browser tab wrapped in a desktop shell.</h3>
+<h3 align="center">Built like a precision flight instrument.</h3>
 
 <p align="center">
   <strong>Aileron</strong> is a native macOS AI copilot for technical interviews, architecture reviews, and live conversations.<br/>
@@ -55,7 +55,7 @@ An *aileron* keeps an aircraft level and responsive in real time without getting
   <img src="assets/deco-divider.svg" alt="" width="760" />
 </p>
 
-## Make It Yours — Slack-Style Themes & Vintage Print Palettes
+## Make It Yours — Themes & Vintage Print Palettes
 
 Open **Settings → Appearance** to tune the workspace live across both windows:
 
