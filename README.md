@@ -17,6 +17,10 @@
 </p>
 
 <p align="center">
+  <img src="assets/aileron-studio.png" alt="Aileron Live Studio — Real-Time Transcript, Stealth Mode, and Structured AI Coaching" width="100%" />
+</p>
+
+<p align="center">
   <img src="assets/deco-divider.svg" alt="" width="760" />
 </p>
 
@@ -45,6 +49,10 @@ An *aileron* keeps an aircraft level and responsive in real time without getting
 - **Stealth Floating Bar (`⌘\`):** A sleek translucent pill that stays above full-screen apps and never steals focus until you type.
 - **Return to App (`pip.exit`):** Dock the floating bar straight back into the main window with a single click — or pop it back out anytime (`pip.enter`) without losing your live session.
 - **Collapsible Everything:** Hide the navigation sidebar (`⌘⌥S`), transcript drawer (`⌘⌥T`), session list, or profile list whenever you want a clean, single-column focus view.
+
+<p align="center">
+  <img src="assets/aileron-hud.png" alt="Aileron Stealth Floating Bar — Compact Live Overlay" width="620" />
+</p>
 
 ### Prep Profiles, Vision Q&A & Searchable Memory
 - **Prep Profiles:** Keep tailored profiles (System Design, Behavioral STAR, Executive Call) holding your resume metrics, key projects, and job description notes so answers sound like *you* — never generic AI boilerplate or `[X]` placeholders.
@@ -200,7 +208,7 @@ aileron-v2/
 ├── Tests/
 │   └── AileronCoreTests/
 ├── entitlements/       # Minimal Hardened Runtime entitlements
-├── assets/             # Graphic-print Art Deco SVG banner, emblem, dividers & theme swatches
+├── assets/             # App screenshots, Art Deco SVG banner, emblem, dividers & theme swatches
 ├── install.sh          # One-line SHA-256 verified Apple Silicon installer
 └── scripts/            # AppIcon.icns generator, Hardened Runtime bundler & .dmg/.zip release packager
 ```
